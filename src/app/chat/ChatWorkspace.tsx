@@ -234,12 +234,26 @@ export function ChatWorkspace({
         if (!res.ok) {
           // Prefer the server's own error text over canned fallbacks so users
           // see the actual cause. If the server returned HTML/plain text, we
-          // trim it so the UI stays sane.
+          // trim it so the UI stays sane. Fields like `detail` may be objects
+          // (validation errors, Vercel gateway objects) — stringify them so
+          // we never render "[object Object]".
+          const pickString = (v: unknown): string | null => {
+            if (v == null) return null;
+            if (typeof v === 'string') return v;
+            try {
+              return JSON.stringify(v).slice(0, 500);
+            } catch {
+              return String(v).slice(0, 500);
+            }
+          };
           const serverSaid =
-            data?.detail ||
-            data?.error ||
-            data?.message ||
-            (raw ? stripHtml(raw).slice(0, 500) : null);
+            pickString(data?.detail) ||
+            pickString(data?.error) ||
+            pickString(data?.message) ||
+            (raw ? stripHtml(raw).slice(0, 500) : null) ||
+            (res.status === 504
+              ? 'انتهت المهلة قبل أن يكمل الوكيل العملية. جرّب تقسيم الطلب إلى خطوات أصغر.'
+              : null);
           const prefix = `خطأ من الخادم (${res.status})`;
           setError(serverSaid ? `${prefix}: ${serverSaid}` : prefix);
           if (res.status === 401) {

@@ -420,6 +420,245 @@ const SPECS: ToolSpec[] = [
     run: (i, c) => c.postComment(i.project_id, i.recording_id, i.content),
   },
 
+  // ───────── Card Tables (Kanban) ─────────
+  {
+    name: 'get_card_table',
+    risk: 'readonly',
+    description:
+      'اجلب لوحة كانبان (card_table) مع قوائم/أعمدة الكانبان الخاصة بها. استخدمها بعد get_project للحصول على معرف card_table من الـ dock.',
+    effect: (i) => `سأجلب لوحة الكانبان ${i.card_table_id} في المشروع ${i.project_id}.`,
+    schema: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'integer' },
+        card_table_id: { type: 'integer' },
+      },
+      required: ['project_id', 'card_table_id'],
+    },
+    validator: z.object({ project_id: idSchema, card_table_id: idSchema }),
+    run: (i, c) => c.getCardTable(i.project_id, i.card_table_id),
+  },
+  {
+    name: 'list_cards_in_column',
+    risk: 'readonly',
+    description: 'اعرض البطاقات داخل عمود معين في لوحة كانبان.',
+    effect: (i) => `سأعرض بطاقات العمود ${i.column_id}.`,
+    schema: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'integer' },
+        column_id: { type: 'integer' },
+      },
+      required: ['project_id', 'column_id'],
+    },
+    validator: z.object({ project_id: idSchema, column_id: idSchema }),
+    run: (i, c) => c.listCardsInColumn(i.project_id, i.column_id),
+  },
+  {
+    name: 'get_card',
+    risk: 'readonly',
+    description: 'اجلب بطاقة كانبان واحدة بكامل حقولها بما في ذلك الخطوات (steps).',
+    effect: (i) => `سأجلب البطاقة ${i.card_id}.`,
+    schema: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'integer' },
+        card_id: { type: 'integer' },
+      },
+      required: ['project_id', 'card_id'],
+    },
+    validator: z.object({ project_id: idSchema, card_id: idSchema }),
+    run: (i, c) => c.getCard(i.project_id, i.card_id),
+  },
+  {
+    name: 'create_card',
+    risk: 'write',
+    description:
+      'أنشئ بطاقة جديدة داخل عمود كانبان. يمكن تحديد تاريخ استحقاق وإرسال إشعار.',
+    effect: (i) => {
+      const parts: string[] = [`سأنشئ بطاقة «${i.title}» في العمود ${i.column_id}`];
+      if (i.due_on) parts.push(`تستحق ${i.due_on}`);
+      if (i.notify) parts.push('مع إرسال إشعار');
+      return parts.join('، ') + '.';
+    },
+    schema: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'integer' },
+        column_id: { type: 'integer' },
+        title: { type: 'string', minLength: 1, maxLength: 300 },
+        content: { type: 'string', maxLength: 50_000 },
+        due_on: { type: 'string', description: 'YYYY-MM-DD' },
+        notify: { type: 'boolean' },
+      },
+      required: ['project_id', 'column_id', 'title'],
+    },
+    validator: z.object({
+      project_id: idSchema,
+      column_id: idSchema,
+      title: z.string().min(1).max(300),
+      content: z.string().max(50_000).optional(),
+      due_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      notify: z.boolean().optional(),
+    }),
+    run: (i, c) =>
+      c.createCard(i.project_id, i.column_id, i.title, {
+        content: i.content,
+        due_on: i.due_on,
+        notify: i.notify,
+      }),
+  },
+  {
+    name: 'update_card',
+    risk: 'write',
+    description: 'حدِّث حقول بطاقة كانبان (العنوان، المحتوى، المسندون، تاريخ الاستحقاق…).',
+    effect: (i) =>
+      `سأُحدّث حقول البطاقة ${i.card_id}: ${Object.keys(i.patch ?? {}).join('، ') || 'لا شيء'}.`,
+    schema: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'integer' },
+        card_id: { type: 'integer' },
+        patch: { type: 'object', additionalProperties: true },
+      },
+      required: ['project_id', 'card_id', 'patch'],
+    },
+    validator: z.object({
+      project_id: idSchema,
+      card_id: idSchema,
+      patch: z.record(z.any()),
+    }),
+    run: (i, c) => c.updateCard(i.project_id, i.card_id, i.patch),
+  },
+  {
+    name: 'move_card',
+    risk: 'write',
+    description: 'انقل بطاقة كانبان إلى عمود آخر وفي موقع محدد (1-مفهرس).',
+    effect: (i) =>
+      `سأنقل البطاقة ${i.card_id} إلى العمود ${i.column_id}${i.position ? ` في الموقع ${i.position}` : ''}.`,
+    schema: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'integer' },
+        card_id: { type: 'integer' },
+        column_id: { type: 'integer' },
+        position: { type: 'integer', minimum: 1 },
+      },
+      required: ['project_id', 'card_id', 'column_id'],
+    },
+    validator: z.object({
+      project_id: idSchema,
+      card_id: idSchema,
+      column_id: idSchema,
+      position: z.number().int().positive().optional(),
+    }),
+    run: (i, c) => c.moveCard(i.project_id, i.card_id, i.column_id, i.position),
+  },
+  {
+    name: 'get_card_column',
+    risk: 'readonly',
+    description: 'اجلب عموداً واحداً من لوحة كانبان بكامل حقوله.',
+    effect: (i) => `سأجلب العمود ${i.column_id}.`,
+    schema: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'integer' },
+        column_id: { type: 'integer' },
+      },
+      required: ['project_id', 'column_id'],
+    },
+    validator: z.object({ project_id: idSchema, column_id: idSchema }),
+    run: (i, c) => c.getCardColumn(i.project_id, i.column_id),
+  },
+  {
+    name: 'create_card_column',
+    risk: 'write',
+    description: 'أنشئ عموداً جديداً في لوحة كانبان.',
+    effect: (i) => `سأنشئ عموداً باسم «${i.title}» في اللوحة ${i.card_table_id}.`,
+    schema: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'integer' },
+        card_table_id: { type: 'integer' },
+        title: { type: 'string', minLength: 1, maxLength: 200 },
+        description: { type: 'string', maxLength: 2000 },
+      },
+      required: ['project_id', 'card_table_id', 'title'],
+    },
+    validator: z.object({
+      project_id: idSchema,
+      card_table_id: idSchema,
+      title: z.string().min(1).max(200),
+      description: z.string().max(2000).optional(),
+    }),
+    run: (i, c) => c.createCardColumn(i.project_id, i.card_table_id, i.title, i.description),
+  },
+  {
+    name: 'update_card_column',
+    risk: 'write',
+    description: 'حدِّث حقول عمود كانبان (العنوان، الوصف…).',
+    effect: (i) =>
+      `سأُحدّث العمود ${i.column_id}: ${Object.keys(i.patch ?? {}).join('، ') || 'لا شيء'}.`,
+    schema: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'integer' },
+        column_id: { type: 'integer' },
+        patch: { type: 'object', additionalProperties: true },
+      },
+      required: ['project_id', 'column_id', 'patch'],
+    },
+    validator: z.object({
+      project_id: idSchema,
+      column_id: idSchema,
+      patch: z.record(z.any()),
+    }),
+    run: (i, c) => c.updateCardColumn(i.project_id, i.column_id, i.patch),
+  },
+  {
+    name: 'set_column_on_hold',
+    risk: 'write',
+    description: 'فعِّل أو ألغِ قسم «قيد الانتظار» (on hold) في عمود كانبان.',
+    effect: (i) =>
+      `${i.on_hold ? 'سأُفعِّل' : 'سألغي'} قسم قيد الانتظار في العمود ${i.column_id}.`,
+    schema: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'integer' },
+        column_id: { type: 'integer' },
+        on_hold: { type: 'boolean' },
+      },
+      required: ['project_id', 'column_id', 'on_hold'],
+    },
+    validator: z.object({ project_id: idSchema, column_id: idSchema, on_hold: z.boolean() }),
+    run: (i, c) => c.setColumnOnHold(i.project_id, i.column_id, i.on_hold),
+  },
+  {
+    name: 'set_column_color',
+    risk: 'write',
+    description:
+      'غيِّر لون عمود كانبان. الألوان المتاحة: white, red, orange, yellow, green, blue, aqua, purple, gray, pink, brown.',
+    effect: (i) => `سأُغيِّر لون العمود ${i.column_id} إلى ${i.color}.`,
+    schema: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'integer' },
+        column_id: { type: 'integer' },
+        color: {
+          type: 'string',
+          enum: ['white', 'red', 'orange', 'yellow', 'green', 'blue', 'aqua', 'purple', 'gray', 'pink', 'brown'],
+        },
+      },
+      required: ['project_id', 'column_id', 'color'],
+    },
+    validator: z.object({
+      project_id: idSchema,
+      column_id: idSchema,
+      color: z.enum(['white', 'red', 'orange', 'yellow', 'green', 'blue', 'aqua', 'purple', 'gray', 'pink', 'brown']),
+    }),
+    run: (i, c) => c.setColumnColor(i.project_id, i.column_id, i.color),
+  },
+
   // ───────── Campfire ─────────
   {
     name: 'list_campfires',

@@ -12,7 +12,7 @@ import { auditLog } from '@/lib/audit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const MODEL = 'claude-opus-4-7';
 const MAX_TURNS = 8;
@@ -27,7 +27,8 @@ const SYSTEM_PROMPT = `أنت "مجال"، وكيل ثمانية الذكي لإ
 # القواعد الذهبية
 - أجب دائماً بالعربية الفصحى المُبسَّطة، بلهجة مهنية هادئة تعكس هوية ثمانية.
 - نفّذ مهام المستخدم عبر الأدوات المتاحة فقط — لا تخترع معرفات (IDs) أو بيانات.
-- استخدم list_projects أولاً إذا لم يحدّد المستخدم المشروع، ثم get_project للحصول على dock (يحوي معرفات todoset / message_board / campfire).
+- استخدم list_projects أولاً إذا لم يحدّد المستخدم المشروع، ثم get_project للحصول على dock (يحوي معرفات todoset / message_board / campfire / kanban_board / vault).
+- للوحات كانبان (kanban_board): استخدم get_card_table للاطّلاع على الأعمدة، ثم list_cards_in_column لعرض البطاقات، أو create_card / move_card / update_card للتعديل.
 - لخّص النتائج في قائمة عربية موجزة، لا تُظهر JSON خاماً.
 
 # السلامة (بالغة الأهمية)

@@ -380,6 +380,87 @@ export class BasecampClient {
     return this.request<any>('POST', `/buckets/${projectId}/chats/${campfireId}/lines.json`, { content });
   }
 
+  // Card Tables (Kanban)
+  //
+  // Per the official BC3 docs, flat routes (e.g. /card_tables/2.json) are the
+  // canonical form, but the legacy project-scoped routes (/buckets/:p/card_tables/…)
+  // remain supported and fit our existing bucket-aware request pattern.
+
+  /** Get a card table with its columns/lists. */
+  getCardTable(projectId: number, cardTableId: number) {
+    return this.request<any>('GET', `/buckets/${projectId}/card_tables/${cardTableId}.json`);
+  }
+  /** Paginated cards in a given column/list. */
+  listCardsInColumn(projectId: number, columnId: number) {
+    return this.request<any[]>('GET', `/buckets/${projectId}/card_tables/lists/${columnId}/cards.json`);
+  }
+  /** A single card, including its steps. */
+  getCard(projectId: number, cardId: number) {
+    return this.request<any>('GET', `/buckets/${projectId}/card_tables/cards/${cardId}.json`);
+  }
+  createCard(
+    projectId: number,
+    columnId: number,
+    title: string,
+    opts: { content?: string; due_on?: string; notify?: boolean } = {},
+  ) {
+    return this.request<any>(
+      'POST',
+      `/buckets/${projectId}/card_tables/lists/${columnId}/cards.json`,
+      { title, ...opts },
+    );
+  }
+  updateCard(projectId: number, cardId: number, patch: Record<string, unknown>) {
+    return this.request<any>(
+      'PUT',
+      `/buckets/${projectId}/card_tables/cards/${cardId}.json`,
+      patch,
+    );
+  }
+  /** Move a card to a different column; position is 1-indexed, defaults to top. */
+  moveCard(projectId: number, cardId: number, columnId: number, position?: number) {
+    return this.request<void>(
+      'POST',
+      `/buckets/${projectId}/card_tables/cards/${cardId}/moves.json`,
+      { column_id: columnId, ...(position !== undefined ? { position } : {}) },
+    );
+  }
+  getCardColumn(projectId: number, columnId: number) {
+    return this.request<any>('GET', `/buckets/${projectId}/card_tables/columns/${columnId}.json`);
+  }
+  createCardColumn(projectId: number, cardTableId: number, title: string, description?: string) {
+    return this.request<any>(
+      'POST',
+      `/buckets/${projectId}/card_tables/${cardTableId}/columns.json`,
+      { title, ...(description ? { description } : {}) },
+    );
+  }
+  updateCardColumn(projectId: number, columnId: number, patch: Record<string, unknown>) {
+    return this.request<any>(
+      'PUT',
+      `/buckets/${projectId}/card_tables/columns/${columnId}.json`,
+      patch,
+    );
+  }
+  /** Toggle the "on hold" section on a column. */
+  setColumnOnHold(projectId: number, columnId: number, onHold: boolean) {
+    return this.request<any>(
+      onHold ? 'POST' : 'DELETE',
+      `/buckets/${projectId}/card_tables/columns/${columnId}/on_hold.json`,
+    );
+  }
+  setColumnColor(
+    projectId: number,
+    columnId: number,
+    color: 'white' | 'red' | 'orange' | 'yellow' | 'green' | 'blue' | 'aqua' | 'purple' | 'gray' | 'pink' | 'brown',
+  ) {
+    return this.request<any>(
+      'PUT',
+      `/buckets/${projectId}/card_tables/columns/${columnId}/color.json`,
+      { color },
+    );
+  }
+
   // My stuff
   //
   // Per the official BC3 docs:
