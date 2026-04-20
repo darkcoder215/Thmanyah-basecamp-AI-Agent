@@ -1,0 +1,65 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@font-face { font-family: 'Thmanyah Sans'; src: url('/fonts/ThmanyahSans-Light.otf') format('opentype');   font-weight: 300; font-display: swap; }
+@font-face { font-family: 'Thmanyah Sans'; src: url('/fonts/ThmanyahSans-Regular.otf') format('opentype'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Thmanyah Sans'; src: url('/fonts/ThmanyahSans-Medium.otf') format('opentype');  font-weight: 500; font-display: swap; }
+@font-face { font-family: 'Thmanyah Sans'; src: url('/fonts/ThmanyahSans-Bold.otf') format('opentype');    font-weight: 700; font-display: swap; }
+@font-face { font-family: 'Thmanyah Sans'; src: url('/fonts/ThmanyahSans-Black.otf') format('opentype');   font-weight: 900; font-display: swap; }
+
+@font-face { font-family: 'Thmanyah Serif Display'; src: url('/fonts/ThmanyahSerifDisplay-Light.otf') format('opentype');   font-weight: 300; font-display: swap; }
+@font-face { font-family: 'Thmanyah Serif Display'; src: url('/fonts/ThmanyahSerifDisplay-Regular.otf') format('opentype'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Thmanyah Serif Display'; src: url('/fonts/ThmanyahSerifDisplay-Medium.otf') format('opentype');  font-weight: 500; font-display: swap; }
+@font-face { font-family: 'Thmanyah Serif Display'; src: url('/fonts/ThmanyahSerifDisplay-Bold.otf') format('opentype');    font-weight: 700; font-display: swap; }
+@font-face { font-family: 'Thmanyah Serif Display'; src: url('/fonts/ThmanyahSerifDisplay-Black.otf') format('opentype');   font-weight: 900; font-display: swap; }
+
+@font-face { font-family: 'Thmanyah Serif Text'; src: url('/fonts/ThmanyahSerifText-Light.otf') format('opentype');   font-weight: 300; font-display: swap; }
+@font-face { font-family: 'Thmanyah Serif Text'; src: url('/fonts/ThmanyahSerifText-Regular.otf') format('opentype'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Thmanyah Serif Text'; src: url('/fonts/ThmanyahSerifText-Medium.otf') format('opentype');  font-weight: 500; font-display: swap; }
+@font-face { font-family: 'Thmanyah Serif Text'; src: url('/fonts/ThmanyahSerifText-Bold.otf') format('opentype');    font-weight: 700; font-display: swap; }
+@font-face { font-family: 'Thmanyah Serif Text'; src: url('/fonts/ThmanyahSerifText-Black.otf') format('opentype');   font-weight: 900; font-display: swap; }
+
+:root {
+  --bg: #1C1B1A;
+  --surface: #242322;
+  --surface-elev: #2E2D2C;
+  --border: rgba(248, 243, 234, 0.10);
+  --border-strong: rgba(248, 243, 234, 0.22);
+  --fg: #F8F3EA;
+  --fg-muted: rgba(248, 243, 234, 0.66);
+  --fg-subtle: rgba(248, 243, 234, 0.42);
+  --accent: #A1B650;
+  --accent-hover: #C7D38A;
+  --accent-fg: #1C1B1A;
+  --danger: #EF4632;
+  color-scheme: dark;
+}
+
+html, body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: 'Thmanyah Sans', 'IBM Plex Sans Arabic', system-ui, sans-serif;
+  font-feature-settings: 'kern', 'ss01';
+  font-variant-numeric: lining-nums proportional-nums;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection { background: var(--accent); color: var(--accent-fg); }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(248,243,234,0.14); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(248,243,234,0.28); }
+
+.diamond {
+  display: inline-block;
+  width: 0.7em; height: 0.7em;
+  background: currentColor;
+  transform: rotate(45deg);
+  vertical-align: middle;
+}
+
+.font-display { font-family: 'Thmanyah Serif Display', 'Amiri', serif; }
+.font-text { font-family: 'Thmanyah Serif Text', 'Amiri', serif; }
