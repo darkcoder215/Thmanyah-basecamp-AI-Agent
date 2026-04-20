@@ -1,0 +1,229 @@
+/* ════════════════════════════════════════════════════════════════════
+ *  THMANYAH DESIGN SYSTEM · tokens.css
+ *  Copy this file into any artifact. Sets CSS custom properties for
+ *  the AUTHENTIC palette (default). For Ember/Gold variants, swap the
+ *  accent block — see comments below.
+ * ════════════════════════════════════════════════════════════════════ */
+
+/* ─── FONTS ─────────────────────────────────────────────────────────
+ * Adjust the url() paths to wherever you copied the fonts in your project.
+ * Thmanyah Sans, Serif Display, Serif Text — Light/Regular/Medium/Bold/Black.
+ */
+@font-face { font-family: 'Thmanyah Sans'; src: url('assets/fonts/ThmanyahSans-Light.otf') format('opentype');   font-weight: 300; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Thmanyah Sans'; src: url('assets/fonts/ThmanyahSans-Regular.otf') format('opentype'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Thmanyah Sans'; src: url('assets/fonts/ThmanyahSans-Medium.otf') format('opentype');  font-weight: 500; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Thmanyah Sans'; src: url('assets/fonts/ThmanyahSans-Bold.otf') format('opentype');    font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Thmanyah Sans'; src: url('assets/fonts/ThmanyahSans-Black.otf') format('opentype');   font-weight: 900; font-style: normal; font-display: swap; }
+
+@font-face { font-family: 'Thmanyah Serif Display'; src: url('assets/fonts/ThmanyahSerifDisplay-Light.otf') format('opentype');   font-weight: 300; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Thmanyah Serif Display'; src: url('assets/fonts/ThmanyahSerifDisplay-Regular.otf') format('opentype'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Thmanyah Serif Display'; src: url('assets/fonts/ThmanyahSerifDisplay-Medium.otf') format('opentype');  font-weight: 500; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Thmanyah Serif Display'; src: url('assets/fonts/ThmanyahSerifDisplay-Bold.otf') format('opentype');    font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Thmanyah Serif Display'; src: url('assets/fonts/ThmanyahSerifDisplay-Black.otf') format('opentype');   font-weight: 900; font-style: normal; font-display: swap; }
+
+@font-face { font-family: 'Thmanyah Serif Text'; src: url('assets/fonts/ThmanyahSerifText-Light.otf') format('opentype');    font-weight: 300; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Thmanyah Serif Text'; src: url('assets/fonts/ThmanyahSerifText-Regular.otf') format('opentype');  font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Thmanyah Serif Text'; src: url('assets/fonts/ThmanyahSerifText-Medium.otf') format('opentype');   font-weight: 500; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Thmanyah Serif Text'; src: url('assets/fonts/ThmanyahSerifText-Bold.otf') format('opentype');     font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Thmanyah Serif Text'; src: url('assets/fonts/ThmanyahSerifText-Black.otf') format('opentype');    font-weight: 900; font-style: normal; font-display: swap; }
+
+/* ─── TOKENS · dark mode · AUTHENTIC palette (default) ──────────── */
+:root {
+  /* Surfaces — warm off-black */
+  --bg:            #1C1B1A;
+  --surface:       #242322;
+  --surface-elev:  #2E2D2C;
+  --surface-sunk:  #0E0D0C;
+
+  /* Borders / separators */
+  --border:        rgba(248,243,234,0.10);
+  --border-strong: rgba(248,243,234,0.22);
+
+  /* Foreground — warm cream */
+  --fg:            #F8F3EA;
+  --fg-muted:      rgba(248,243,234,0.66);
+  --fg-subtle:     rgba(248,243,234,0.42);
+
+  /* Accent — brand green (authentic) */
+  --accent:        #A1B650;      /* brand-300 — best on dark */
+  --accent-hover:  #C7D38A;      /* brand-200 */
+  --accent-deep:   #5B7A1E;      /* brand-500 — signature */
+  --accent-dark:   #384C12;      /* brand-700 */
+  --accent-fg:     #1C1B1A;      /* readable on accent */
+
+  /* For EMBER variant — uncomment to replace:
+     --accent: #EF4632; --accent-hover: #F28874;
+     --accent-deep: #BF2E1E; --accent-dark: #7A1C12; --accent-fg: #FFFFFF;
+   */
+
+  /* For GOLD variant — uncomment to replace:
+     --accent: #E8C36B; --accent-hover: #F7E5B8;
+     --accent-deep: #C89A24; --accent-dark: #96710E; --accent-fg: #1C1B1A;
+   */
+
+  /* Semantic */
+  --success:       #00BC6D;
+  --warn:          #FFBA00;
+  --info:          #2F9DB5;
+  --danger:        #EF4632;
+  --gold:          #C89A24;
+
+  /* Typography families */
+  --font-sans:    'Thmanyah Sans', 'IBM Plex Sans Arabic', system-ui, sans-serif;
+  --font-display: 'Thmanyah Serif Display', 'Amiri', serif;
+  --font-text:    'Thmanyah Serif Text', 'Thmanyah Serif Display', 'Amiri', serif;
+
+  /* Radius scale */
+  --r-xs: 4px;  --r-sm: 8px;  --r-md: 12px;  --r-lg: 16px;  --r-xl: 24px;  --r-full: 9999px;
+
+  /* Spacing (4px base, 20 steps — only the ones you need most) */
+  --s-1: 2px;  --s-2: 4px;  --s-3: 6px;  --s-4: 8px;  --s-5: 12px;
+  --s-6: 16px; --s-7: 20px; --s-8: 24px; --s-9: 32px; --s-10: 40px;
+  --s-11: 48px; --s-12: 56px; --s-13: 64px; --s-14: 72px; --s-15: 80px;
+  --s-16: 96px; --s-17: 112px; --s-18: 128px;
+
+  /* Shadows (dark mode) */
+  --shadow-sm: 0 2px 6px rgba(0,0,0,0.35);
+  --shadow-md: 0 6px 16px rgba(0,0,0,0.45), 0 2px 4px rgba(0,0,0,0.25);
+  --shadow-lg: 0 16px 40px rgba(0,0,0,0.55), 0 4px 12px rgba(0,0,0,0.3);
+  --shadow-xl: 0 32px 80px rgba(0,0,0,0.7), 0 8px 24px rgba(0,0,0,0.4);
+}
+
+/* ─── LIGHT MODE OVERRIDE ─────────────────────────────────────────
+ * Use [data-mode="light"] on the root or a section to flip into cream mode.
+ */
+[data-mode="light"] {
+  --bg:            #F8F3EA;   /* cream */
+  --surface:       #FCFAF5;
+  --surface-elev:  #FFFFFF;
+  --surface-sunk:  #E7DFCB;
+
+  --border:        rgba(10,9,8,0.10);
+  --border-strong: rgba(10,9,8,0.20);
+
+  --fg:            #1C1B1A;
+  --fg-muted:      rgba(10,9,8,0.60);
+  --fg-subtle:     rgba(10,9,8,0.40);
+
+  /* Authentic accent in light mode uses the darker green for AA */
+  --accent:        #5B7A1E;
+  --accent-hover:  #4A6418;
+  --accent-deep:   #384C12;
+  --accent-dark:   #27340C;
+  --accent-fg:     #FCFAF5;
+
+  --shadow-sm: 0 2px 6px rgba(10,10,10,0.08);
+  --shadow-md: 0 6px 16px rgba(10,10,10,0.10), 0 2px 4px rgba(10,10,10,0.05);
+  --shadow-lg: 0 16px 40px rgba(10,10,10,0.14), 0 4px 12px rgba(10,10,10,0.06);
+  --shadow-xl: 0 32px 80px rgba(10,10,10,0.18), 0 8px 24px rgba(10,10,10,0.08);
+}
+
+/* ─── BASE RESET ──────────────────────────────────────────────────── */
+html, body {
+  margin: 0; padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-variant-numeric: lining-nums proportional-nums;  /* Latin numerals inside Arabic */
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+*, *::before, *::after { box-sizing: border-box; }
+
+/* ─── TYPOGRAPHY HELPERS ──────────────────────────────────────────── */
+.t-display {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.28;   /* Arabic display needs more leading than Latin */
+}
+.t-display-tight { line-height: 1.1; }  /* use ONLY with explicit <br> breaks */
+
+.t-serif-text {
+  font-family: var(--font-text);
+  font-weight: 400;
+  line-height: 1.7;
+}
+
+.eyebrow {
+  font-size: 16px; font-weight: 600;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--accent);
+}
+
+.num-en { font-feature-settings: "lnum"; }
+
+/* ─── CORE COMPONENTS ─────────────────────────────────────────────── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  padding: var(--s-9);
+}
+.card-soft {
+  background: var(--surface-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: var(--s-8);
+}
+
+.pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 36px; padding: 0 16px;
+  background: var(--surface-elev); color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--r-full);
+  font-size: 14px; font-weight: 500;
+}
+.pill--accent {
+  background: color-mix(in oklab, var(--accent) 18%, transparent);
+  color: var(--accent);
+  border-color: color-mix(in oklab, var(--accent) 32%, transparent);
+}
+
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 48px; padding: 0 24px;
+  background: var(--accent); color: var(--accent-fg);
+  border: none; border-radius: var(--r-md);
+  font-family: var(--font-sans); font-size: 16px; font-weight: 600;
+  cursor: pointer;
+}
+.btn--ghost { background: transparent; color: var(--fg); border: 1px solid var(--border-strong); }
+
+/* Diamond brand mark — use at 32px/48px/64px/96px */
+.mark-diamond {
+  display: inline-block;
+  width: 32px; height: 32px;
+  background: var(--accent);
+  transform: rotate(45deg);
+  position: relative;
+}
+.mark-diamond::after {
+  content: ''; position: absolute; inset: 6px;
+  background: var(--bg);
+}
+
+/* Dotted grid background */
+.grid-dots {
+  background-image: radial-gradient(rgba(248,243,234,0.08) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+[data-mode="light"] .grid-dots {
+  background-image: radial-gradient(rgba(10,9,8,0.08) 1px, transparent 1px);
+}
+
+/* Data table */
+table.data { width: 100%; border-collapse: collapse; font-size: 18px; }
+table.data th, table.data td {
+  text-align: right;   /* Arabic default */
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--border);
+}
+[dir="ltr"] table.data th, [dir="ltr"] table.data td { text-align: left; }
+table.data th {
+  font-weight: 600; color: var(--fg-muted);
+  font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase;
+  border-bottom: 1px solid var(--border-strong);
+}
+table.data tr:last-child td { border-bottom: none; }

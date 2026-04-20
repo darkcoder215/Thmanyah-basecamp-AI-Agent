@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"/>
+<title>بطاقة اقتباس · ثمانية</title>
+<link rel="stylesheet" href="reference/tokens.css"/>
+<style>
+  body { background:#444; display:flex; flex-wrap:wrap; gap:24px; padding:24px; margin:0; }
+
+  .card-social {
+    background: var(--bg);
+    color: var(--fg);
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* 1080 × 1350 — Instagram portrait */
+  .post-portrait { width: 540px; height: 675px; }   /* displayed at 0.5× */
+
+  /* 1080 × 1080 — square */
+  .post-square { width: 540px; height: 540px; }
+
+  .post-inner {
+    padding: 48px;
+    height: 100%;
+    display: flex; flex-direction: column; justify-content: space-between;
+    position: relative; z-index: 2;
+  }
+
+  .post-quote {
+    font-family: var(--font-display);
+    font-weight: 500;
+    font-size: 36px;
+    line-height: 1.35;
+    letter-spacing: -0.01em;
+  }
+
+  .post-attr {
+    font-size: 14px; color: var(--fg-muted);
+    margin-top: 16px;
+  }
+
+  .post-topbar {
+    display:flex; align-items:center; gap:8px;
+  }
+  .post-topbar .diamond {
+    width: 16px; height: 16px; background: var(--accent); transform: rotate(45deg);
+  }
+  .post-topbar .name {
+    font-family: var(--font-display); font-size:15px; font-weight:700;
+  }
+
+  .glow {
+    position:absolute; inset-inline-end:-120px; inset-block-end:-120px;
+    width:340px; height:340px; border-radius:50%;
+    background: radial-gradient(circle, color-mix(in oklab, var(--accent) 40%, transparent), transparent 60%);
+    filter: blur(30px);
+    pointer-events:none;
+  }
+</style>
+</head>
+<body>
+
+<!-- Quote · portrait -->
+<section class="card-social post-portrait">
+  <div class="glow"></div>
+  <div class="post-inner">
+    <div class="post-topbar">
+      <span class="diamond"></span>
+      <span class="name">ثمانية</span>
+    </div>
+
+    <div>
+      <div class="post-quote">
+        «اقتباسٌ قصير يحمل فكرةً واحدة مميّزة — لا أكثر من سطرين.»
+      </div>
+      <div class="post-attr">
+        — اسم المتحدّث · اسم البرنامج
+      </div>
+    </div>
+
+    <div style="font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--fg-subtle);">
+      حلقة 14 · استمع الآن
+    </div>
+  </div>
+</section>
+
+<!-- Episode announcement · square -->
+<section class="card-social post-square" style="background: var(--accent); color: var(--accent-fg);">
+  <div class="post-inner">
+    <div style="display:flex; align-items:center; gap:8px;">
+      <span style="width:16px;height:16px;background:var(--accent-fg);transform:rotate(45deg);"></span>
+      <span style="font-family:var(--font-display);font-size:15px;font-weight:700;">ثمانية</span>
+    </div>
+
+    <div>
+      <div style="font-size: 12px; letter-spacing:0.18em; text-transform:uppercase; opacity:0.7;">حلقة جديدة</div>
+      <div style="font-family: var(--font-display); font-weight:700; font-size: 52px; line-height:1.1; margin-top:12px;">
+        عنوان<br/>الحلقة.
+      </div>
+      <div style="font-size:14px; opacity:0.8; margin-top:16px;">
+        مع اسم الضيف · 62 دقيقة
+      </div>
+    </div>
+
+    <div style="font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; opacity:0.8;">
+      متوفّرة على جميع المنصّات
+    </div>
+  </div>
+</section>
+
+</body>
+</html>

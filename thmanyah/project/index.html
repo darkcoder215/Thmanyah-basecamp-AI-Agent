@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>مجال · نظام ثمانية للتصميم</title>
+
+<style>
+  /* ─── Thmanyah type system (real OTF files) ────────────────────── */
+  @font-face { font-family: 'Thmanyah Sans'; src: url('assets/fonts/ThmanyahSans-Light.otf') format('opentype');   font-weight: 300; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Thmanyah Sans'; src: url('assets/fonts/ThmanyahSans-Regular.otf') format('opentype'); font-weight: 400; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Thmanyah Sans'; src: url('assets/fonts/ThmanyahSans-Medium.otf') format('opentype');  font-weight: 500; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Thmanyah Sans'; src: url('assets/fonts/ThmanyahSans-Bold.otf') format('opentype');    font-weight: 700; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Thmanyah Sans'; src: url('assets/fonts/ThmanyahSans-Black.otf') format('opentype');   font-weight: 900; font-style: normal; font-display: swap; }
+
+  @font-face { font-family: 'Thmanyah Serif Display'; src: url('assets/fonts/ThmanyahSerifDisplay-Light.otf') format('opentype');   font-weight: 300; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Thmanyah Serif Display'; src: url('assets/fonts/ThmanyahSerifDisplay-Regular.otf') format('opentype'); font-weight: 400; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Thmanyah Serif Display'; src: url('assets/fonts/ThmanyahSerifDisplay-Medium.otf') format('opentype');  font-weight: 500; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Thmanyah Serif Display'; src: url('assets/fonts/ThmanyahSerifDisplay-Bold.otf') format('opentype');    font-weight: 700; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Thmanyah Serif Display'; src: url('assets/fonts/ThmanyahSerifDisplay-Black.otf') format('opentype');   font-weight: 900; font-style: normal; font-display: swap; }
+
+  @font-face { font-family: 'Thmanyah Serif Text'; src: url('assets/fonts/ThmanyahSerifText-Light.otf') format('opentype');   font-weight: 300; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Thmanyah Serif Text'; src: url('assets/fonts/ThmanyahSerifText-Regular.otf') format('opentype'); font-weight: 400; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Thmanyah Serif Text'; src: url('assets/fonts/ThmanyahSerifText-Medium.otf') format('opentype');  font-weight: 500; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Thmanyah Serif Text'; src: url('assets/fonts/ThmanyahSerifText-Bold.otf') format('opentype');    font-weight: 700; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Thmanyah Serif Text'; src: url('assets/fonts/ThmanyahSerifText-Black.otf') format('opentype');   font-weight: 900; font-style: normal; font-display: swap; }
+
+  :root {
+    --font-sans:    'Thmanyah Sans', 'IBM Plex Sans Arabic', system-ui, sans-serif;
+    --font-display: 'Thmanyah Serif Display', 'Thmanyah Serif Text', 'Amiri', serif;
+    --font-text:    'Thmanyah Serif Text', 'Thmanyah Serif Display', serif;
+    --font-mono:    'JetBrains Mono', ui-monospace, monospace;
+    color-scheme: dark;
+  }
+  html, body {
+    margin:0; padding:0;
+    background: #000; color:#fff;
+    font-family: var(--font-sans);
+    font-feature-settings: "kern", "ss01";
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  button, input, textarea { font-family: inherit; }
+  a { color: inherit; }
+  #root { min-height: 100vh; }
+  ::selection { background: var(--color-accent, #EF4632); color:#fff; }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.14); border-radius: 10px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.28); }
+</style>
+</head>
+<body>
+
+<!-- Tweakable defaults -->
+<script>
+window.TWEAKS = /*EDITMODE-BEGIN*/{
+  "palette": "gold",
+  "mode": "dark",
+  "radius": "default",
+  "density": "comfortable",
+  "typeScale": "thmanyah"
+}/*EDITMODE-END*/;
+</script>
+
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="src/tokens.jsx"></script>
+<script type="text/babel" src="src/primitives.jsx"></script>
+<script type="text/babel" src="src/components.jsx"></script>
+<script type="text/babel" src="src/surfaces-landing.jsx"></script>
+<script type="text/babel" src="src/surfaces-app.jsx"></script>
+<script type="text/babel" src="src/surfaces-player.jsx"></script>
+<script type="text/babel" src="src/surfaces-deck.jsx"></script>
+<script type="text/babel" src="src/surfaces-report.jsx"></script>
+<script type="text/babel" src="src/surfaces-social.jsx"></script>
+<script type="text/babel" src="src/surfaces-email.jsx"></script>
+<script type="text/babel" src="src/tweaks.jsx"></script>
+<script type="text/babel" src="src/app.jsx"></script>
+
+</body>
+</html>

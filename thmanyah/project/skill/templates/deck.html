@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>عنوان العرض · ثمانية</title>
+
+<link rel="stylesheet" href="reference/tokens.css"/>
+
+<style>
+  /* Slide-specific styles — adjust as needed */
+  section.slide {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    overflow: hidden;
+    padding: 88px 96px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .slide-footer {
+    margin-top: auto;
+    display: flex; align-items: center; justify-content: space-between;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+    font-size: 14px; color: var(--fg-subtle);
+  }
+  .slide-footer .brand {
+    display: inline-flex; align-items: center; gap: 10px;
+    color: var(--fg-muted); font-weight: 500;
+  }
+  .slide-footer .brand .dot {
+    width: 8px; height: 8px; background: var(--accent); transform: rotate(45deg);
+  }
+</style>
+</head>
+<body style="background:#000; margin:0;">
+
+<!-- Optional speaker notes — one string per slide -->
+<script type="application/json" id="speaker-notes">
+[]
+</script>
+
+<!-- Load the deck-stage web component. Copy deck_stage.js into your project. -->
+<script src="deck-stage.js"></script>
+
+<deck-stage width="1920" height="1080">
+
+  <!-- ═════════════════════════════════════════════════════════════ -->
+  <!-- 01 · COVER                                                     -->
+  <!-- ═════════════════════════════════════════════════════════════ -->
+  <section class="slide" data-label="01 Cover" style="padding: 72px 96px; position:relative; justify-content: space-between;">
+
+    <!-- Ambient accent glow -->
+    <div style="position:absolute; inset-inline-end:-300px; inset-block-end:-300px; width:900px; height:900px; border-radius:50%; background: radial-gradient(circle, color-mix(in oklab, var(--accent) 40%, transparent), transparent 60%); filter: blur(40px); pointer-events:none;"></div>
+
+    <!-- Top: brand lockup -->
+    <div style="display:flex; justify-content:space-between; align-items:center; position:relative; z-index:2;">
+      <div style="display:flex; align-items:center; gap:16px;">
+        <span class="mark-diamond" style="width:40px; height:40px;"></span>
+        <span style="font-weight:500; color: var(--fg-muted); letter-spacing:0.08em; font-size: 24px;">ثمانية · ورشة داخلية</span>
+      </div>
+      <span style="color: var(--fg-subtle); font-size: 24px; letter-spacing: 0.08em;">Q2 · 2026</span>
+    </div>
+
+    <!-- Center -->
+    <div style="display:flex; flex-direction:column; justify-content:center; position:relative; z-index:2;">
+      <span class="eyebrow" style="margin-bottom:32px; font-size:22px;">الفصل الأول · الاستكشاف</span>
+      <h1 class="t-display" style="font-size: 180px; margin:0; color: var(--fg); line-height:1.15;">
+        عنوان <span style="color: var(--accent);">الرئيسي.</span>
+      </h1>
+      <p style="max-width: 900px; margin-top: 40px; font-size: 28px; line-height: 1.5; color: var(--fg-muted); font-weight: 300;">
+        جملة وصفية قصيرة تُحدّد السياق — سطران فقط.
+      </p>
+    </div>
+
+    <!-- Bottom metadata -->
+    <div style="display:flex; justify-content:space-between; align-items:flex-end; position:relative; z-index:2;">
+      <div style="display:flex; gap:56px;">
+        <div>
+          <div style="font-size:24px; letter-spacing:0.12em; text-transform:uppercase; color: var(--fg-subtle); margin-bottom:10px;">قائد المبادرة</div>
+          <div style="font-weight:600; color: var(--fg); font-size:26px;">الاسم الكامل</div>
+        </div>
+        <div>
+          <div style="font-size:24px; letter-spacing:0.12em; text-transform:uppercase; color: var(--fg-subtle); margin-bottom:10px;">المدّة</div>
+          <div style="font-weight:600; color: var(--fg); font-size:26px;">60 دقيقة</div>
+        </div>
+        <div>
+          <div style="font-size:24px; letter-spacing:0.12em; text-transform:uppercase; color: var(--fg-subtle); margin-bottom:10px;">التواصل</div>
+          <div style="font-weight:600; color: var(--fg); font-size:26px;">contact@thmanyah.com</div>
+        </div>
+      </div>
+      <div style="font-family: var(--font-display); font-size:56px; font-weight:700; color: var(--fg-subtle); letter-spacing:-0.02em;">01 / XX</div>
+    </div>
+  </section>
+
+  <!-- ═════════════════════════════════════════════════════════════ -->
+  <!-- 02 · CONTENT · single headline + 2-column stat cards           -->
+  <!-- ═════════════════════════════════════════════════════════════ -->
+  <section class="slide" data-label="02 Why">
+    <div style="display:grid; grid-template-columns: 1fr 1.1fr; gap: 120px; flex:1;">
+      <div>
+        <span class="eyebrow">الإطار</span>
+        <h2 class="t-display" style="font-size: 120px; margin: 40px 0 32px 0;">
+          عنوان<br/><span style="color: var(--accent);">فرعي.</span>
+        </h2>
+        <p style="font-size: 24px; line-height: 1.6; color: var(--fg-muted); max-width: 600px;">
+          فقرة وصفية قصيرة تُحدّد الفكرة المحورية.
+        </p>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:20px; justify-content:center;">
+        <div class="card">
+          <div style="font-family: var(--font-display); font-size: 140px; font-weight:700; line-height:1; color: var(--accent);">40%</div>
+          <div style="font-size: 20px; color: var(--fg-muted); margin-top:8px; line-height:1.4;">
+            سطرٌ أو سطران يُفسّران الرقم — ومصدره.
+          </div>
+        </div>
+        <div class="card" style="background: color-mix(in oklab, var(--accent) 10%, var(--surface));">
+          <div style="font-family: var(--font-display); font-size: 140px; font-weight:700; line-height:1;">3.2×</div>
+          <div style="font-size: 20px; color: var(--fg-muted); margin-top:8px; line-height:1.4;">
+            السطر التفسيري — ملاحظة قصيرة.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="slide-footer">
+      <div class="brand"><span class="dot"></span>ثمانية · القسم</div>
+      <div>02 / XX</div>
+    </div>
+  </section>
+
+  <!-- ═════════════════════════════════════════════════════════════ -->
+  <!-- 03 · CLOSING                                                   -->
+  <!-- ═════════════════════════════════════════════════════════════ -->
+  <section class="slide" data-label="03 Closing" style="padding: 0; position:relative; justify-content: space-between;">
+    <div class="grid-dots" style="position:absolute; inset:0; opacity:0.5;"></div>
+
+    <div style="position:absolute; inset:0; display:flex; flex-direction:column; justify-content:center; padding: 0 120px;">
+      <span class="eyebrow" style="margin-bottom:32px;">الخطوة التالية</span>
+      <h2 class="t-display" style="font-size: 132px; margin:0; line-height: 1.1;">
+        دعوة واضحة<br/><span style="color: var(--accent);">للفعل.</span>
+      </h2>
+      <p style="max-width: 900px; margin-top: 48px; font-size: 26px; line-height: 1.5; color: var(--fg-muted);">
+        سطران يُخبران الجمهور بالخطوة الملموسة.
+      </p>
+    </div>
+
+    <div style="position:absolute; bottom:64px; right:120px; left:120px; display:flex; justify-content:space-between; align-items:flex-end;">
+      <div style="display:flex; align-items:center; gap: 16px;">
+        <span class="mark-diamond" style="width:32px; height:32px;"></span>
+        <div>
+          <div style="font-weight:600; font-size: 22px;">الاسم · الدور</div>
+          <div style="font-size: 17px; color: var(--fg-muted); margin-top:4px;">contact@thmanyah.com</div>
+        </div>
+      </div>
+      <div style="font-family: var(--font-display); font-size:64px; font-weight:700; color: var(--fg-subtle); letter-spacing:-0.02em;">XX / XX</div>
+    </div>
+  </section>
+
+</deck-stage>
+</body>
+</html>

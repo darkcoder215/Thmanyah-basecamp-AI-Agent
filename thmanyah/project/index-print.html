@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>مجال · نظام ثمانية للتصميم — طباعة</title>
+
+<style>
+  /* ─── Thmanyah type system (real OTF files) ────────────────────── */
+  @font-face { font-family: 'Thmanyah Sans'; src: url('assets/fonts/ThmanyahSans-Light.otf') format('opentype');   font-weight: 300; font-style: normal; font-display: block; }
+  @font-face { font-family: 'Thmanyah Sans'; src: url('assets/fonts/ThmanyahSans-Regular.otf') format('opentype'); font-weight: 400; font-style: normal; font-display: block; }
+  @font-face { font-family: 'Thmanyah Sans'; src: url('assets/fonts/ThmanyahSans-Medium.otf') format('opentype');  font-weight: 500; font-style: normal; font-display: block; }
+  @font-face { font-family: 'Thmanyah Sans'; src: url('assets/fonts/ThmanyahSans-Bold.otf') format('opentype');    font-weight: 700; font-style: normal; font-display: block; }
+  @font-face { font-family: 'Thmanyah Sans'; src: url('assets/fonts/ThmanyahSans-Black.otf') format('opentype');   font-weight: 900; font-style: normal; font-display: block; }
+
+  @font-face { font-family: 'Thmanyah Serif Display'; src: url('assets/fonts/ThmanyahSerifDisplay-Light.otf') format('opentype');   font-weight: 300; font-style: normal; font-display: block; }
+  @font-face { font-family: 'Thmanyah Serif Display'; src: url('assets/fonts/ThmanyahSerifDisplay-Regular.otf') format('opentype'); font-weight: 400; font-style: normal; font-display: block; }
+  @font-face { font-family: 'Thmanyah Serif Display'; src: url('assets/fonts/ThmanyahSerifDisplay-Medium.otf') format('opentype');  font-weight: 500; font-style: normal; font-display: block; }
+  @font-face { font-family: 'Thmanyah Serif Display'; src: url('assets/fonts/ThmanyahSerifDisplay-Bold.otf') format('opentype');    font-weight: 700; font-style: normal; font-display: block; }
+  @font-face { font-family: 'Thmanyah Serif Display'; src: url('assets/fonts/ThmanyahSerifDisplay-Black.otf') format('opentype');   font-weight: 900; font-style: normal; font-display: block; }
+
+  @font-face { font-family: 'Thmanyah Serif Text'; src: url('assets/fonts/ThmanyahSerifText-Light.otf') format('opentype');   font-weight: 300; font-style: normal; font-display: block; }
+  @font-face { font-family: 'Thmanyah Serif Text'; src: url('assets/fonts/ThmanyahSerifText-Regular.otf') format('opentype'); font-weight: 400; font-style: normal; font-display: block; }
+  @font-face { font-family: 'Thmanyah Serif Text'; src: url('assets/fonts/ThmanyahSerifText-Medium.otf') format('opentype');  font-weight: 500; font-style: normal; font-display: block; }
+  @font-face { font-family: 'Thmanyah Serif Text'; src: url('assets/fonts/ThmanyahSerifText-Bold.otf') format('opentype');    font-weight: 700; font-style: normal; font-display: block; }
+  @font-face { font-family: 'Thmanyah Serif Text'; src: url('assets/fonts/ThmanyahSerifText-Black.otf') format('opentype');   font-weight: 900; font-style: normal; font-display: block; }
+
+  :root {
+    --font-sans:    'Thmanyah Sans', 'IBM Plex Sans Arabic', system-ui, sans-serif;
+    --font-display: 'Thmanyah Serif Display', 'Thmanyah Serif Text', 'Amiri', serif;
+    --font-text:    'Thmanyah Serif Text', 'Thmanyah Serif Display', serif;
+    color-scheme: dark;
+  }
+
+  html, body {
+    margin:0; padding:0;
+    background: #1C1B1A; color:#F8F3EA;
+    font-family: var(--font-sans);
+    font-feature-settings: "kern", "ss01";
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  button, input, textarea { font-family: inherit; }
+  a { color: inherit; }
+  #root { min-height: 100vh; }
+
+  /* ─── Print layout ──────────────────────────────────────────────── */
+  @page {
+    size: A3 landscape;
+    margin: 0;
+  }
+
+  /* Force paint of backgrounds everywhere */
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+
+  @media print {
+    html, body { background: #1C1B1A !important; }
+    /* Hide interactive chrome */
+    .print-hide,
+    [data-print-hide="true"] { display: none !important; }
+
+    /* Each top-level section is a "page group" */
+    .print-section {
+      break-before: page;
+      page-break-before: always;
+    }
+    .print-section:first-of-type {
+      break-before: auto;
+      page-break-before: auto;
+    }
+
+    /* Avoid splitting important blocks across pages */
+    .print-card,
+    section > div {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    /* Kill sticky positioning (prints weirdly) */
+    [style*="sticky"] { position: static !important; }
+  }
+
+  /* In screen preview, show sections stacked too */
+  .print-section + .print-section {
+    border-top: 1px dashed rgba(248,243,234,0.12);
+    margin-top: 40px;
+  }
+</style>
+</head>
+<body>
+
+<script>
+window.TWEAKS = {
+  "palette": "authentic",
+  "mode": "dark",
+  "radius": "default",
+  "density": "comfortable",
+  "typeScale": "readex"
+};
+window.IS_PRINT = true;
+</script>
+
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="src/tokens.jsx"></script>
+<script type="text/babel" src="src/primitives.jsx"></script>
+<script type="text/babel" src="src/components.jsx"></script>
+<script type="text/babel" src="src/surfaces-landing.jsx"></script>
+<script type="text/babel" src="src/surfaces-app.jsx"></script>
+<script type="text/babel" src="src/surfaces-player.jsx"></script>
+<script type="text/babel" src="src/surfaces-deck.jsx"></script>
+<script type="text/babel" src="src/surfaces-report.jsx"></script>
+<script type="text/babel" src="src/surfaces-social.jsx"></script>
+<script type="text/babel" src="src/surfaces-email.jsx"></script>
+
+<!-- Print-specific app: renders every tab stacked -->
+<script type="text/babel">
+/* global React, ReactDOM, TokensContext, buildTokens, useTokens, Text, ThmanyahLogo, DiamondGlyph, SurfaceLanding, SurfaceApp, SurfacePlayer, SurfaceDeck, SurfaceReport, SurfaceSocial, SurfaceEmail */
+
+function PrintTitlePage() {
+  const tk = useTokens(); const { c, t } = tk;
+  return (
+    <section className="print-section" style={{ background: c.bg, color: c.fg, minHeight:'100vh', padding: '80px 48px', position:'relative', overflow:'hidden', display:'flex', flexDirection:'column', justifyContent:'space-between' }}>
+      <div style={{ position:'absolute', insetInlineEnd:-200, top:-100, opacity:0.06 }}><DiamondGlyph size={900} color={c.accent}/></div>
+
+      <div style={{ display:'flex', alignItems:'center', gap: 16, position:'relative' }}>
+        <ThmanyahLogo size={36} color={c.fg}/>
+        <div style={{ width:1, height: 32, background: c.border }}/>
+        <Text v="label" color={c.fgMuted}>مَجال · Design System · v1.0</Text>
+      </div>
+
+      <div style={{ position:'relative' }}>
+        <Text v="overline" color={c.accent} style={{ display:'block', marginBottom: 24 }}>نظام التصميم · الإصدار الأول</Text>
+        <h1 style={{ fontFamily:t.display, fontWeight:700, fontSize: 200, lineHeight:0.9, letterSpacing:'-0.035em', margin:0, color: c.fg }}>
+          مَجال.<br/><span style={{ color: c.accent }}>نظام</span> ثمانية للتصميم.
+        </h1>
+        <Text v="bodyLg" color={c.fgMuted} style={{ display:'block', marginTop: 40, maxWidth: 900, fontSize: 26, lineHeight:1.55 }}>
+          لغةٌ بصريّة واحدة لكل ما تُنتجه ثمانية — من الموقع إلى التطبيق، من العرض التقديمي إلى البريد.
+        </Text>
+      </div>
+
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-end', position:'relative' }}>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(4, auto)', gap: 48 }}>
+          {[{v:'٣',l:'شخصيّات لونيّة'},{v:'٣٠+',l:'مكوّن'},{v:'٧',l:'سطح نموذجي'},{v:'١٠٠٪',l:'عربي'}].map((s,i)=>(
+            <div key={i}>
+              <div style={{ fontFamily: t.display, fontWeight:700, fontSize: 80, lineHeight:1, color: c.fg, letterSpacing:'-0.03em' }}>{s.v}</div>
+              <Text v="bodySm" color={c.fgMuted} style={{ display:'block', marginTop:8 }}>{s.l}</Text>
+            </div>
+          ))}
+        </div>
+        <Text v="caption" color={c.fgSubtle}>مستند مُصدَّر للطباعة · {new Date().toLocaleDateString('ar-SA')}</Text>
+      </div>
+    </section>
+  );
+}
+
+function PrintSectionHeader({ eyebrow, title, sub }) {
+  const { c, t } = useTokens();
+  return (
+    <div style={{ padding: '56px 48px 16px', background: c.bg, color: c.fg, borderBottom:`1px solid ${c.border}` }}>
+      <Text v="overline" color={c.accent}>{eyebrow}</Text>
+      <h2 style={{ fontFamily:t.display, fontWeight:700, fontSize: 64, lineHeight:1, letterSpacing:'-0.02em', margin:'16px 0 12px', color: c.fg }}>{title}</h2>
+      {sub && <Text v="bodyLg" color={c.fgMuted} style={{ display:'block', maxWidth: 820 }}>{sub}</Text>}
+    </div>
+  );
+}
+
+// Import the two internal panels from app.jsx's scope won't work — redefine here
+// with identical rendering using exposed window.* utilities.
+
+// TOKENS PANEL (copy of the one in app.jsx, tuned for paged layout)
+function PrintTokens() {
+  const tk = useTokens(); const { c, r, t, type, PALETTES, RADII, DENSITIES, BRAND, BLACK, WHITE, SEMANTIC, RADIUS_RAW, SPACING_RAW } = tk;
+  return (
+    <section className="print-section" style={{ background: c.bg, color: c.fg }}>
+      <PrintSectionHeader eyebrow="الأساسيات · TOKENS" title="الألوان، الطباعة، الحواف، المسافات." sub="مواصفات النظام — مستخرجة من ملفات TDS في Figma."/>
+      <div style={{ padding:'40px 48px' }}>
+
+        {/* Palettes */}
+        <Text v="overline" color={c.fgMuted} style={{ display:'block', marginBottom:12 }}>الشخصيّات اللونيّة</Text>
+        <div className="print-card" style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap: 24, marginBottom: 48 }}>
+          {Object.keys(PALETTES).map(key=>{
+            const p = PALETTES[key];
+            const tkn = p.dark;
+            return (
+              <div key={key} style={{ border:`1px solid ${c.border}`, borderRadius: r.lg, overflow:'hidden' }}>
+                <div style={{ background: tkn.bg, padding: 20, color: tkn.fg }}>
+                  <Text v="overline" color={tkn.fgMuted}>{p.name}</Text>
+                  <Text v="h3" color={tkn.fg} style={{ display:'block', marginTop:4 }}>{p.nameAr}</Text>
+                  <Text v="bodySm" color={tkn.fgMuted} style={{ display:'block', marginTop:8 }}>{p.note}</Text>
+                  <div style={{ display:'flex', gap:2, marginTop: 16 }}>
+                    {[tkn.accent, tkn.fg, tkn.surfaceElev, tkn.surfaceSunken, tkn.bg].map((col,i)=>(
+                      <div key={i} style={{ flex:1, height: 40, background: col, borderRadius: i===0?r.sm:0, border: col===tkn.bg?`1px solid ${tkn.border}`:'none' }}/>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ background: p.light.bg, padding: 14, color: p.light.fg, borderTop:`1px solid ${c.border}` }}>
+                  <div style={{ display:'flex', gap:2 }}>
+                    {[p.light.accent, p.light.fg, p.light.surfaceElev, p.light.surfaceSunken, p.light.bg].map((col,i)=>(
+                      <div key={i} style={{ flex:1, height: 28, background: col, borderRadius: i===0?r.sm:0, border: col===p.light.bg?`1px solid ${p.light.border}`:'none' }}/>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Current palette details */}
+        <Text v="overline" color={c.fgMuted} style={{ display:'block', marginBottom:12 }}>الباليت الحاليّة — مُفصَّلة</Text>
+        <div className="print-card" style={{ display:'grid', gridTemplateColumns:'repeat(6, 1fr)', gap: 12, marginBottom: 48 }}>
+          {[
+            ['bg', c.bg],['surface', c.surface],['surface-elev', c.surfaceElev],['surface-sunken', c.surfaceSunken],
+            ['fg', c.fg],['fg-muted', c.fgMuted],['accent', c.accent],['accent-hover', c.accentHover],
+            ['success', c.success],['warn', c.warn],['info', c.info],['danger', c.danger],
+          ].map(([name, color])=>(
+            <div key={name}>
+              <div style={{ height: 60, borderRadius: r.md, background: color, border: `1px solid ${c.border}` }}/>
+              <div style={{ fontFamily:'monospace', fontSize: 10, marginTop: 6, color: c.fg }}>{name}</div>
+              <div style={{ fontFamily:'monospace', fontSize: 9, color: c.fgSubtle }}>{String(color).slice(0,14)}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Raw TDS ramps */}
+        <Text v="overline" color={c.fgMuted} style={{ display:'block', marginBottom:12 }}>السلّم الخام · TDS</Text>
+        {[
+          { name:'Brand · الأخضر المميّز', scale: BRAND, prefix: 'brand' },
+          { name:'Black · النيوترال الداكن', scale: BLACK, prefix: 'black' },
+          { name:'White · النيوترال الكريمي', scale: WHITE, prefix: 'white' },
+        ].map(row=>(
+          <div key={row.prefix} className="print-card" style={{ marginBottom: 20 }}>
+            <Text v="label" color={c.fgMuted} style={{ display:'block', marginBottom: 8, fontFamily:'monospace' }}>{row.name}</Text>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(9, 1fr)', gap: 4 }}>
+              {Object.entries(row.scale).map(([k,v])=>(
+                <div key={k}>
+                  <div style={{ height: 44, background: v, borderRadius: r.sm, border:`1px solid ${c.border}` }}/>
+                  <div style={{ fontFamily:'monospace', fontSize: 9, marginTop: 4, color: c.fgMuted }}>{row.prefix}/{k}</div>
+                  <div style={{ fontFamily:'monospace', fontSize: 8, color: c.fgSubtle }}>{v}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+
+        <div className="print-card" style={{ marginTop: 16, marginBottom: 48 }}>
+          <Text v="label" color={c.fgMuted} style={{ display:'block', marginBottom: 8, fontFamily:'monospace' }}>Semantic · الألوان الدلالية</Text>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(5, 1fr)', gap: 16 }}>
+            {Object.entries(SEMANTIC).map(([name, scale])=>(
+              <div key={name}>
+                <div style={{ fontFamily:'monospace', fontSize: 10, marginBottom: 4, color: c.fgMuted }}>{name}</div>
+                <div style={{ display:'flex', borderRadius: r.sm, overflow:'hidden', border:`1px solid ${c.border}` }}>
+                  {Object.values(scale).map((v,i)=>(
+                    <div key={i} style={{ flex:1, height: 36, background: v }}/>
+                  ))}
+                </div>
+                <div style={{ fontFamily:'monospace', fontSize: 8, marginTop: 4, color: c.fgSubtle }}>100 · 300 · 500 · 700 · 900</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Type */}
+        <div className="print-card" style={{ pageBreakBefore:'always', breakBefore:'page' }}>
+          <Text v="overline" color={c.fgMuted} style={{ display:'block', marginBottom:12 }}>الطباعة</Text>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 2fr', gap: 32, alignItems:'start' }}>
+            <div>
+              <div style={{ padding: 18, background: c.surfaceElev, borderRadius: r.md }}>
+                <Text v="overline" color={c.fgMuted} style={{ display:'block' }}>Sans</Text>
+                <div style={{ fontFamily: t.sans, fontWeight:500, fontSize: 20, marginTop:4, color: c.fg }}>{t.name.split('×')[0].trim()}</div>
+                <Text v="overline" color={c.fgMuted} style={{ display:'block', marginTop:14 }}>Display</Text>
+                <div style={{ fontFamily: t.display, fontWeight:700, fontSize: 24, marginTop:4, color: c.fg }}>{t.name.split('×')[1]?.trim() || 'Amiri'}</div>
+              </div>
+            </div>
+            <div>
+              {[
+                { v:'display2', l:'Display 2 · 88px', s:'ثمانية تروي' },
+                { v:'display3', l:'Display 3 · 64px', s:'ما لا يُروى' },
+                { v:'h2', l:'H2 · 36px · Sans', s:'رأسٌ رئيسيّ للأقسام' },
+                { v:'h4', l:'H4 · 22px', s:'عنوان فرعي' },
+                { v:'bodyLg', l:'Body Lg · 18px', s:'نصٌّ طويل للقراءة المريحة' },
+                { v:'body', l:'Body · 16px', s:'النصّ الأساسي في الواجهات' },
+                { v:'caption', l:'Caption · 12px', s:'بيانات وصفيّة، وقت، تصنيف' },
+              ].map(x=>(
+                <div key={x.v} style={{ display:'grid', gridTemplateColumns:'180px 1fr', gap: 24, padding:'14px 0', borderBottom:`1px solid ${c.border}`, alignItems:'baseline' }}>
+                  <Text v="caption" color={c.fgMuted} style={{ fontFamily:'monospace' }}>{x.l}</Text>
+                  <Text v={x.v} color={c.fg}>{x.s}</Text>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Radius */}
+        <div className="print-card" style={{ marginTop: 40 }}>
+          <Text v="overline" color={c.fgMuted} style={{ display:'block', marginBottom:12 }}>الحدّة · ١١ خطوة</Text>
+          <div style={{ background: c.surface, border:`1px solid ${c.border}`, borderRadius: r.lg, padding: 20, display:'grid', gridTemplateColumns:'repeat(11, 1fr)', gap: 8 }}>
+            {Object.entries(RADIUS_RAW).map(([k,v])=>(
+              <div key={k} style={{ textAlign:'center' }}>
+                <div style={{ aspectRatio:'1', background: c.accent, borderRadius: v }}/>
+                <div style={{ fontFamily:'monospace', fontSize: 9, marginTop: 6, color: c.fgMuted }}>{k}</div>
+                <div style={{ fontFamily:'monospace', fontSize: 8, color: c.fgSubtle }}>{v === 9999 ? '∞' : `${v}px`}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Spacing */}
+        <div className="print-card" style={{ marginTop: 24 }}>
+          <Text v="overline" color={c.fgMuted} style={{ display:'block', marginBottom:12 }}>المسافة · ٢٠ خطوة</Text>
+          <div style={{ background: c.surface, borderRadius: r.lg, padding: 20, border:`1px solid ${c.border}`, columnCount: 2, columnGap: 32 }}>
+            {Object.entries(SPACING_RAW).filter(([,v])=>v>0).map(([k,sp])=>(
+              <div key={k} style={{ display:'flex', alignItems:'center', gap:16, padding:'4px 0', breakInside:'avoid' }}>
+                <Text v="caption" color={c.fgMuted} style={{ fontFamily:'monospace', minWidth: 36 }}>{k}</Text>
+                <Text v="caption" color={c.fgSubtle} style={{ fontFamily:'monospace', minWidth: 42 }}>{sp}px</Text>
+                <div style={{ height: 8, width: Math.min(sp * 2, 260), background: c.accent, borderRadius: 2 }}/>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function PrintSurface({ eyebrow, title, sub, children }) {
+  const { c } = useTokens();
+  return (
+    <section className="print-section" style={{ background: c.bg, color: c.fg }}>
+      <PrintSectionHeader eyebrow={eyebrow} title={title} sub={sub}/>
+      <div>{children}</div>
+    </section>
+  );
+}
+
+function PrintApp() {
+  const [tweaks] = React.useState({ ...window.TWEAKS });
+  const tokens = buildTokens(tweaks);
+  React.useEffect(() => {
+    document.body.style.background = tokens.c.bg;
+    document.body.style.color = tokens.c.fg;
+    document.documentElement.style.setProperty('--color-accent', tokens.c.accent);
+    document.documentElement.style.setProperty('--font-sans', tokens.t.sans);
+    document.documentElement.style.setProperty('--font-display', tokens.t.display);
+  }, [tokens]);
+
+  return (
+    <TokensContext.Provider value={tokens}>
+      <PrintTitlePage/>
+      <PrintTokens/>
+      <PrintSurface eyebrow="السطح · الموقع الرسمي" title="الموقع العام." sub="الصفحات العامّة والعروض التسويقية.">
+        <SurfaceLanding/>
+      </PrintSurface>
+      <PrintSurface eyebrow="السطح · التطبيق" title="تطبيق ثمانية." sub="مكتبة الاستماع والمشاهدة — ويب وتطبيق.">
+        <SurfaceApp/>
+      </PrintSurface>
+      <PrintSurface eyebrow="السطح · المشغّل" title="مشغّل الصوت والفيديو." sub="واجهات الاستماع النشِطة.">
+        <SurfacePlayer/>
+      </PrintSurface>
+      <PrintSurface eyebrow="السطح · العروض" title="عروض تقديمية." sub="قوالب شرائح للطاقم والعملاء.">
+        <SurfaceDeck/>
+      </PrintSurface>
+      <PrintSurface eyebrow="السطح · التقارير" title="تقارير البيانات." sub="لوحات رقمية وتقارير أداء.">
+        <SurfaceReport/>
+      </PrintSurface>
+      <PrintSurface eyebrow="السطح · اجتماعي" title="قوالب المنشورات." sub="منشورات السوشيال ميديا — إنستغرام، تويتر، لنكدإن.">
+        <SurfaceSocial/>
+      </PrintSurface>
+      <PrintSurface eyebrow="السطح · البريد" title="قوالب البريد الإلكتروني." sub="نشرات وإشعارات المستخدمين.">
+        <SurfaceEmail/>
+      </PrintSurface>
+    </TokensContext.Provider>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<PrintApp/>);
+
+// Auto-print after fonts + render settle
+(async function(){
+  try {
+    if (document.fonts && document.fonts.ready) { await document.fonts.ready; }
+  } catch(e){}
+  await new Promise(r => setTimeout(r, 1200));
+  window.print();
+})();
+</script>
+
+</body>
+</html>

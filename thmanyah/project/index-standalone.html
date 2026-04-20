@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>مجال · نظام ثمانية للتصميم</title>
+
+<!-- Thumbnail shown while bundle unpacks and as no-JS fallback -->
+<template id="__bundler_thumbnail" data-bg-color="#000000">
+  <svg viewBox="0 0 1200 800" xmlns="http://www.w3.org/2000/svg">
+    <rect width="1200" height="800" fill="#000"/>
+    <g transform="translate(600 400)">
+      <g transform="rotate(45)" fill="#EF4632">
+        <rect x="-120" y="-120" width="240" height="240" rx="20"/>
+      </g>
+      <g fill="#fff">
+        <path d="M-40 -18 L0 -58 L40 -18 L0 22 Z"/>
+        <rect x="-4" y="10" width="8" height="70" rx="2"/>
+      </g>
+    </g>
+    <text x="600" y="620" text-anchor="middle" font-family="serif" font-size="36" fill="#fff" opacity="0.7">مجال</text>
+  </svg>
+</template>
+
+<!-- Images referenced in JSX (invisible to bundler as HTML attrs) — lifted to window.__resources -->
+<meta name="ext-resource-dependency" content="assets/show-1.png" data-resource-id="show1"/>
+<meta name="ext-resource-dependency" content="assets/show-2.png" data-resource-id="show2"/>
+<meta name="ext-resource-dependency" content="assets/show-3.png" data-resource-id="show3"/>
+<meta name="ext-resource-dependency" content="assets/show-4.png" data-resource-id="show4"/>
+<meta name="ext-resource-dependency" content="assets/show-5.png" data-resource-id="show5"/>
+<meta name="ext-resource-dependency" content="assets/show-6.png" data-resource-id="show6"/>
+<meta name="ext-resource-dependency" content="assets/show-7.png" data-resource-id="show7"/>
+<meta name="ext-resource-dependency" content="assets/show-8.png" data-resource-id="show8"/>
+<meta name="ext-resource-dependency" content="assets/doc-1.png"  data-resource-id="doc1"/>
+<meta name="ext-resource-dependency" content="assets/hero-2.png" data-resource-id="hero2"/>
+<meta name="ext-resource-dependency" content="assets/hero-3.png" data-resource-id="hero3"/>
+
+<style>
+  /* ─── Thmanyah type system (real OTF files) ────────────────────── */
+  @font-face { font-family: 'Thmanyah Sans'; src: url('assets/fonts/ThmanyahSans-Light.otf') format('opentype');   font-weight: 300; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Thmanyah Sans'; src: url('assets/fonts/ThmanyahSans-Regular.otf') format('opentype'); font-weight: 400; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Thmanyah Sans'; src: url('assets/fonts/ThmanyahSans-Medium.otf') format('opentype');  font-weight: 500; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Thmanyah Sans'; src: url('assets/fonts/ThmanyahSans-Bold.otf') format('opentype');    font-weight: 700; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Thmanyah Sans'; src: url('assets/fonts/ThmanyahSans-Black.otf') format('opentype');   font-weight: 900; font-style: normal; font-display: swap; }
+
+  @font-face { font-family: 'Thmanyah Serif Display'; src: url('assets/fonts/ThmanyahSerifDisplay-Light.otf') format('opentype');   font-weight: 300; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Thmanyah Serif Display'; src: url('assets/fonts/ThmanyahSerifDisplay-Regular.otf') format('opentype'); font-weight: 400; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Thmanyah Serif Display'; src: url('assets/fonts/ThmanyahSerifDisplay-Medium.otf') format('opentype');  font-weight: 500; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Thmanyah Serif Display'; src: url('assets/fonts/ThmanyahSerifDisplay-Bold.otf') format('opentype');    font-weight: 700; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Thmanyah Serif Display'; src: url('assets/fonts/ThmanyahSerifDisplay-Black.otf') format('opentype');   font-weight: 900; font-style: normal; font-display: swap; }
+
+  @font-face { font-family: 'Thmanyah Serif Text'; src: url('assets/fonts/ThmanyahSerifText-Light.otf') format('opentype');   font-weight: 300; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Thmanyah Serif Text'; src: url('assets/fonts/ThmanyahSerifText-Regular.otf') format('opentype'); font-weight: 400; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Thmanyah Serif Text'; src: url('assets/fonts/ThmanyahSerifText-Medium.otf') format('opentype');  font-weight: 500; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Thmanyah Serif Text'; src: url('assets/fonts/ThmanyahSerifText-Bold.otf') format('opentype');    font-weight: 700; font-style: normal; font-display: swap; }
+  @font-face { font-family: 'Thmanyah Serif Text'; src: url('assets/fonts/ThmanyahSerifText-Black.otf') format('opentype');   font-weight: 900; font-style: normal; font-display: swap; }
+
+  :root {
+    --font-sans:    'Thmanyah Sans', 'IBM Plex Sans Arabic', system-ui, sans-serif;
+    --font-display: 'Thmanyah Serif Display', 'Thmanyah Serif Text', 'Amiri', serif;
+    --font-text:    'Thmanyah Serif Text', 'Thmanyah Serif Display', serif;
+    --font-mono:    'JetBrains Mono', ui-monospace, monospace;
+    color-scheme: dark;
+  }
+  html, body {
+    margin:0; padding:0;
+    background: #000; color:#fff;
+    font-family: var(--font-sans);
+    font-feature-settings: "kern", "ss01";
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  button, input, textarea { font-family: inherit; }
+  a { color: inherit; }
+  #root { min-height: 100vh; }
+  ::selection { background: var(--color-accent, #EF4632); color:#fff; }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.14); border-radius: 10px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.28); }
+</style>
+</head>
+<body>
+
+<!-- Tweakable defaults -->
+<script>
+window.TWEAKS = /*EDITMODE-BEGIN*/{
+  "palette": "ember",
+  "mode": "dark",
+  "radius": "default",
+  "density": "comfortable",
+  "typeScale": "thmanyah"
+}/*EDITMODE-END*/;
+
+// Resolve an asset path (e.g. 'assets/show-1.png') to its bundled blob URL.
+// Falls back to the original path if unbundled (dev mode).
+window.__asset = function(path) {
+  if (!window.__resources) return path;
+  var map = {
+    'assets/show-1.png':'show1','assets/show-2.png':'show2','assets/show-3.png':'show3',
+    'assets/show-4.png':'show4','assets/show-5.png':'show5','assets/show-6.png':'show6',
+    'assets/show-7.png':'show7','assets/show-8.png':'show8','assets/doc-1.png':'doc1',
+    'assets/hero-2.png':'hero2','assets/hero-3.png':'hero3'
+  };
+  var id = map[path];
+  return (id && window.__resources[id]) || path;
+};
+</script>
+
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="src-standalone/tokens.jsx"></script>
+<script type="text/babel" src="src-standalone/primitives.jsx"></script>
+<script type="text/babel" src="src-standalone/components.jsx"></script>
+<script type="text/babel" src="src-standalone/surfaces-landing.jsx"></script>
+<script type="text/babel" src="src-standalone/surfaces-app.jsx"></script>
+<script type="text/babel" src="src-standalone/surfaces-player.jsx"></script>
+<script type="text/babel" src="src-standalone/surfaces-deck.jsx"></script>
+<script type="text/babel" src="src-standalone/surfaces-report.jsx"></script>
+<script type="text/babel" src="src-standalone/surfaces-social.jsx"></script>
+<script type="text/babel" src="src-standalone/surfaces-email.jsx"></script>
+<script type="text/babel" src="src-standalone/tweaks.jsx"></script>
+<script type="text/babel" src="src-standalone/app.jsx"></script>
+
+</body>
+</html>

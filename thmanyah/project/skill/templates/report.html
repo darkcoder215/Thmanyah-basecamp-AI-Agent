@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"/>
+<title>عنوان التقرير · ثمانية</title>
+
+<link rel="stylesheet" href="reference/tokens.css"/>
+
+<style>
+  @page { size: A4; margin: 0; }
+
+  html, body { background: #888; margin: 0; padding: 0; }
+  body[data-mode="light"] { background: #888; }   /* the grey is just the screen gutter */
+
+  .page {
+    width: 210mm; height: 297mm;
+    background: var(--bg);
+    color: var(--fg);
+    padding: 24mm 20mm;
+    margin: 12mm auto;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.25);
+    display: flex;
+    flex-direction: column;
+    page-break-after: always;
+    position: relative;
+  }
+  @media print { .page { margin: 0; box-shadow: none; } }
+
+  .letterhead {
+    display: flex; align-items: center; justify-content: space-between;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 32px;
+  }
+  .letterhead .brand { display: flex; align-items: center; gap: 12px; }
+  .letterhead .brand .diamond {
+    width: 24px; height: 24px; background: var(--accent); transform: rotate(45deg); position: relative;
+  }
+  .letterhead .brand .diamond::after { content:''; position:absolute; inset:4px; background: var(--bg); }
+  .letterhead .brand .name { font-family: var(--font-display); font-size: 18px; font-weight: 700; }
+  .letterhead .meta { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--fg-muted); }
+
+  h1.report-title {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 48pt;
+    line-height: 1.15;
+    letter-spacing: -0.015em;
+    margin: 24px 0 16px 0;
+  }
+  h2.section {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 24pt;
+    line-height: 1.2;
+    margin: 32px 0 12px 0;
+  }
+  h3.subsection {
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: 14pt;
+    line-height: 1.25;
+    margin: 20px 0 8px 0;
+  }
+
+  p.body {
+    font-family: var(--font-text);
+    font-size: 13pt;
+    line-height: 1.7;
+    margin: 0 0 12px 0;
+    color: var(--fg);
+  }
+  p.lead {
+    font-family: var(--font-text);
+    font-size: 16pt;
+    line-height: 1.55;
+    margin: 0 0 24px 0;
+    color: var(--fg-muted);
+  }
+
+  blockquote.pullquote {
+    margin: 32px 0;
+    padding: 24px 0;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    font-family: var(--font-display);
+    font-size: 22pt;
+    line-height: 1.4;
+    font-weight: 500;
+    color: var(--accent);
+  }
+
+  .page-footer {
+    margin-top: auto;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    display: flex; justify-content: space-between;
+    font-size: 9pt; color: var(--fg-subtle);
+    font-family: var(--font-sans);
+  }
+
+  .two-col {
+    column-count: 2;
+    column-gap: 16mm;
+    column-rule: 1px solid var(--border);
+  }
+</style>
+</head>
+<body data-mode="light">
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- PAGE 1 · Cover                                                   -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<section class="page" style="justify-content: space-between;">
+  <header class="letterhead">
+    <div class="brand">
+      <span class="diamond"></span>
+      <span class="name">ثمانية</span>
+    </div>
+    <div class="meta">تقرير داخلي · Q2 · 2026</div>
+  </header>
+
+  <div style="flex:1; display:flex; flex-direction:column; justify-content:center;">
+    <div style="font-size: 10pt; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent); margin-bottom: 16px;">الفصل الأول</div>
+    <h1 class="report-title">
+      عنوان التقرير<br/>
+      <span style="color: var(--accent);">بخطٍّ ثانٍ مُبرز.</span>
+    </h1>
+    <p class="lead" style="margin-top: 32px; max-width: 120mm;">
+      سطرٌ تمهيدي واحد يُحدّد السياق والأهمّية.
+    </p>
+  </div>
+
+  <div style="display:flex; gap:24mm; margin-bottom: 16px;">
+    <div>
+      <div style="font-size: 9pt; letter-spacing:0.12em; text-transform:uppercase; color: var(--fg-muted);">المؤلّف</div>
+      <div style="font-weight:600; font-size: 12pt; margin-top:4px;">الاسم الكامل</div>
+    </div>
+    <div>
+      <div style="font-size: 9pt; letter-spacing:0.12em; text-transform:uppercase; color: var(--fg-muted);">التاريخ</div>
+      <div style="font-weight:600; font-size: 12pt; margin-top:4px;">10 أبريل 2026</div>
+    </div>
+    <div>
+      <div style="font-size: 9pt; letter-spacing:0.12em; text-transform:uppercase; color: var(--fg-muted);">الفئة</div>
+      <div style="font-weight:600; font-size: 12pt; margin-top:4px;">داخلي · سرّي</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- PAGE 2 · Body (single-column)                                    -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<section class="page">
+  <header class="letterhead">
+    <div class="brand"><span class="diamond"></span><span class="name">ثمانية</span></div>
+    <div class="meta">الفصل الأول · السياق</div>
+  </header>
+
+  <h2 class="section">عنوان القسم</h2>
+  <p class="lead">
+    فقرة استهلالية بخطٍّ أكبر قليلاً من الجسم — تُقدِّم الفكرة الأساسية.
+  </p>
+
+  <p class="body">
+    فقرة جسم طبيعية. استخدم Serif Text للعربية بسطرٍ 1.7. اجعل الأسطر بين 50–75 حرفاً للقراءة المريحة.
+    رقم لاتيني داخل النصّ مثل 2026 يظهر طبيعياً بفضل خاصّية lining-nums.
+  </p>
+
+  <blockquote class="pullquote">
+    «اقتباسٌ محوري من القسم — جملةٌ قصيرة تُحفِّز التفكير.»
+  </blockquote>
+
+  <h3 class="subsection">عنوان فرعي</h3>
+  <p class="body">
+    فقرة تابعة. الفقرات المتتالية لا تحتاج مسافة كبيرة بينها — 12px كافية.
+  </p>
+
+  <footer class="page-footer">
+    <div>ثمانية · تقرير داخلي</div>
+    <div>02</div>
+  </footer>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- PAGE 3 · Body (two-column)                                       -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<section class="page">
+  <header class="letterhead">
+    <div class="brand"><span class="diamond"></span><span class="name">ثمانية</span></div>
+    <div class="meta">الفصل الثاني · التحليل</div>
+  </header>
+
+  <h2 class="section">تحليلٌ معمَّق</h2>
+
+  <div class="two-col">
+    <p class="body">
+      فقرة طويلة مكتوبة بخطّ Serif Text — هذا هو الخطّ المُخصَّص للقراءة الطويلة بالعربية.
+      تدفّق العمودين يُعالَج تلقائياً بواسطة خاصّية column-count في CSS.
+    </p>
+    <p class="body">
+      استخدم الفقرات القصيرة — أربعة إلى ستّة أسطر — لتحسين القراءة على الشاشة والورق معاً.
+    </p>
+    <h3 class="subsection" style="break-inside:avoid;">نقطةٌ ثانوية</h3>
+    <p class="body">
+      عنوانٌ داخل العمود يُكسِر الرتابة ويُساعد على المسح البصري.
+    </p>
+  </div>
+
+  <footer class="page-footer">
+    <div>ثمانية · تقرير داخلي</div>
+    <div>03</div>
+  </footer>
+</section>
+
+</body>
+</html>
