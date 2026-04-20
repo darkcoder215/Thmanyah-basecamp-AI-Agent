@@ -168,10 +168,15 @@ export async function POST(req: NextRequest) {
         messages,
       });
       response = await stream.finalMessage();
-    } catch (err) {
+    } catch (err: any) {
       // Sanitize Anthropic errors before returning. Never leak raw SDK error
       // strings — they can include API keys, request IDs, internal URLs.
-      console.error('[agent] anthropic error:', err);
+      // Log as a structured object so Vercel's log viewer doesn't truncate
+      // the message into uselessness.
+      console.error('[agent] anthropic error name:', err?.name);
+      console.error('[agent] anthropic error status:', err?.status);
+      console.error('[agent] anthropic error message:', err?.message);
+      console.error('[agent] anthropic error body:', JSON.stringify(err?.error ?? null));
       if (err instanceof Anthropic.RateLimitError) {
         return NextResponse.json(
           { error: 'rate_limited', detail: 'تم تجاوز حدّ Anthropic. انتظر ثوانٍ ثم حاول مجدداً.' },
