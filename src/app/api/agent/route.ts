@@ -163,7 +163,6 @@ export async function POST(req: NextRequest) {
             cache_control: { type: 'ephemeral' },
           },
         ] as any,
-        thinking: { type: 'adaptive' },
         tools: AGENT_TOOLS,
         messages,
       });
@@ -177,6 +176,17 @@ export async function POST(req: NextRequest) {
       console.error('[agent] anthropic error status:', err?.status);
       console.error('[agent] anthropic error message:', err?.message);
       console.error('[agent] anthropic error body:', JSON.stringify(err?.error ?? null));
+      await auditLog({
+        sid,
+        kind: 'agent.anthropic_error',
+        ok: false,
+        meta: {
+          name: String(err?.name ?? ''),
+          status: Number(err?.status ?? 0),
+          message: String(err?.message ?? '').slice(0, 2000),
+          body: JSON.stringify(err?.error ?? null).slice(0, 4000),
+        },
+      });
       if (err instanceof Anthropic.RateLimitError) {
         return NextResponse.json(
           { error: 'rate_limited', detail: 'تم تجاوز حدّ Anthropic. انتظر ثوانٍ ثم حاول مجدداً.' },
