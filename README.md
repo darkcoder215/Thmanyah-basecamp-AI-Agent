@@ -332,7 +332,7 @@ npm run dev
 
 ### Supabase schema
 
-Run `app/supabase/schema.sql` in your project SQL editor.
+Run `supabase/schema.sql` in your project SQL editor.
 
 ### Basecamp integration
 
@@ -343,11 +343,11 @@ URI matching `BASECAMP_REDIRECT_URI`.
 
 ## Deploying to Vercel
 
-1. **Create a Vercel project** pointing at the `app/` subdirectory.
-   - Root directory: `app`
+1. **Create a Vercel project** pointing at this repository.
+   - Root directory: repo root (Next.js auto-detected)
    - Framework preset: **Next.js** (auto-detected)
    - Build command: `next build` (default)
-2. **Configure environment variables** (all of `app/.env.example`). Mark every one as
+2. **Configure environment variables** (all of `.env.example`). Mark every one as
    *server-only* — none of these should have the `NEXT_PUBLIC_` prefix.
 3. **Update `BASECAMP_REDIRECT_URI`** to your Vercel URL, e.g.
    `https://majal.thmanyah.com/api/auth/callback`, and add the same URI to the Basecamp
@@ -362,7 +362,7 @@ URI matching `BASECAMP_REDIRECT_URI`.
 ### Security checklist before going live
 
 - [ ] `NEXT_PUBLIC_*` is not set on any secret.
-- [ ] Supabase RLS is applied and the anon key is not used anywhere in `app/src`.
+- [ ] Supabase RLS is applied and the anon key is not used anywhere in `src`.
 - [ ] `SESSION_SECRET` and `TOKEN_ENCRYPTION_KEY` are 32-byte random values, unique per
       environment.
 - [ ] The OAuth redirect on Basecamp exactly matches `BASECAMP_REDIRECT_URI`.
@@ -395,7 +395,7 @@ URI matching `BASECAMP_REDIRECT_URI`.
 `list_comments`, `post_comment`, `list_campfires`, `post_campfire_line`, `my_schedule`,
 `my_assignments`, `my_overdue`.
 
-See `app/src/lib/agentTools.ts` for the full schema, risk levels, and Arabic effect strings.
+See `src/lib/agentTools.ts` for the full schema, risk levels, and Arabic effect strings.
 
 ---
 
