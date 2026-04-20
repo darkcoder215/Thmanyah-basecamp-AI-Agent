@@ -269,8 +269,12 @@ export class BasecampClient {
   }
 
   // Projects
+  //
+  // Basecamp 3 does not accept `?status=` on /projects.json — archived and
+  // trashed live at distinct paths. Using `?status=active` returns 400.
   listProjects(status: 'active' | 'archived' | 'trashed' = 'active') {
-    return this.request<any[]>('GET', `/projects.json?status=${status}`);
+    const path = status === 'active' ? '/projects.json' : `/projects/${status}.json`;
+    return this.request<any[]>('GET', path);
   }
   getProject(projectId: number) {
     return this.request<any>('GET', `/projects/${projectId}.json`);
@@ -376,14 +380,59 @@ export class BasecampClient {
   }
 
   // My stuff
-  mySchedule() {
-    return this.request<any>('GET', `/my/schedule.json`);
+  //
+  // Basecamp 3 exposes no /my/schedule, /my/assignments, or /my/overdue
+  // endpoints — those were hallucinated and return 404. Instead we query
+  // the cross-project Recordings endpoint and filter client-side.
+  //
+  // https://github.com/basecamp/bc3-api/blob/master/sections/recordings.md
+
+  /** All active Schedule entries across projects, most-recent first. */
+  async mySchedule(): Promise<any[]> {
+    return this.fetchAllRecordings('Schedule::Entry', 'active');
   }
-  myAssignments() {
-    return this.request<any>('GET', `/my/assignments.json`);
+
+  /** Todos assigned to the current user across all projects. */
+  async myAssignments(): Promise<any[]> {
+    const todos = await this.fetchAllRecordings('Todo', 'active');
+    const meId = this.session.userId;
+    return todos.filter((t: any) =>
+      !t.completed &&
+      Array.isArray(t.assignees) &&
+      t.assignees.some((a: any) => a?.id === meId),
+    );
   }
-  myOverdue() {
-    return this.request<any>('GET', `/my/overdue.json`);
+
+  /** Todos assigned to the current user whose due date is past. */
+  async myOverdue(): Promise<any[]> {
+    const mine = await this.myAssignments();
+    const today = new Date().toISOString().slice(0, 10);
+    return mine.filter((t: any) => typeof t.due_on === 'string' && t.due_on < today);
+  }
+
+  /** Paginated recordings fetch — follows Link: rel="next" up to a cap. */
+  private async fetchAllRecordings(
+    type: 'Todo' | 'Schedule::Entry' | 'Message' | 'Document' | 'Kanban::Card',
+    status: 'active' | 'archived' | 'trashed',
+  ): Promise<any[]> {
+    const MAX_PAGES = 5;
+    const results: any[] = [];
+    let page = 1;
+    while (page <= MAX_PAGES) {
+      const q = new URLSearchParams({
+        type,
+        status,
+        sort: 'updated_at',
+        direction: 'desc',
+        page: String(page),
+      });
+      const batch = await this.request<any[]>('GET', `/projects/recordings.json?${q.toString()}`);
+      if (!Array.isArray(batch) || batch.length === 0) break;
+      results.push(...batch);
+      if (batch.length < 50) break;
+      page++;
+    }
+    return results;
   }
 }
 
