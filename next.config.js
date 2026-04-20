@@ -2,30 +2,10 @@
 
 const isProd = process.env.NODE_ENV === 'production';
 
-// Strict CSP. Next.js inlines a small bootstrap script in dev; in prod all
-// scripts are hashed/external under /_next/. `'unsafe-inline'` is only kept
-// for styles because Tailwind's JIT emits inline styles at build time.
-const csp = [
-  "default-src 'self'",
-  "base-uri 'self'",
-  "form-action 'self'",
-  "frame-ancestors 'none'",
-  "object-src 'none'",
-  // Scripts: self only. Next's inlined runtime is shipped with same-origin.
-  isProd ? "script-src 'self'" : "script-src 'self' 'unsafe-eval' 'unsafe-inline'",
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob:",
-  "font-src 'self' data:",
-  // Connect-src is tight: our own origin only. Agent and Basecamp calls go
-  // through our server, never directly from the browser.
-  "connect-src 'self'",
-  "worker-src 'self' blob:",
-  "manifest-src 'self'",
-  "upgrade-insecure-requests",
-].join('; ');
+// CSP is set per-request in src/middleware.ts so it can carry a fresh nonce
+// for Next.js' inline hydration script. Everything else stays static here.
 
 const securityHeaders = [
-  { key: 'Content-Security-Policy', value: csp },
   { key: 'X-Frame-Options', value: 'DENY' },
   { key: 'X-Content-Type-Options', value: 'nosniff' },
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
