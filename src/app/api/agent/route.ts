@@ -17,7 +17,9 @@ export const maxDuration = 60;
 const MODEL = 'claude-opus-4-7';
 const MAX_TURNS = 8;
 const MAX_TOOL_OUTPUT_CHARS = 8000;
-const MAX_MESSAGE_CHARS = 8000;
+/** Tighter cap for what we ship to the browser — tool outputs can be huge. */
+const PUBLIC_OUTPUT_PREVIEW_CHARS = 2000;
+const MAX_MESSAGE_CHARS = 200_000;
 const HISTORY_TOKEN_BUDGET = 40_000;
 
 const SYSTEM_PROMPT = `أنت "مجال"، وكيل ثمانية الذكي لإدارة Basecamp باللغة العربية.
@@ -37,6 +39,14 @@ const SYSTEM_PROMPT = `أنت "مجال"، وكيل ثمانية الذكي لإ
 - إذا رفض المستخدم أو تردّد: لا تنفّذ، واقترح بديلاً أخف.
 - إذا فشلت أداة، اعرض السبب بالعربية (مثل: انتهاء صلاحية الربط، عدم وجود صلاحيات، عنصر غير موجود) واقترح الخطوة التالية بدلاً من المحاولة مجدداً بلا تعديل.
 
+# تنسيق الإجابة (Markdown)
+- استخدم Markdown في إجاباتك. لا تعرض JSON خاماً أبداً.
+- عرض قائمة مشاريع/مهام/أعضاء ≥ ثلاثة عناصر: استخدم جدول Markdown بأعمدة واضحة بالعربية (مثال للمهام: | المهمة | المسند إليه | تاريخ الاستحقاق |). ضع صف الفاصل "|---|---|---|" أسفل العنوان.
+- لملف شخصي أو مشروع واحد: استخدم قائمة «**حقل**: قيمة» سطر لكل حقل (الاسم، البريد، الدور، …).
+- لعناصر أقل من ثلاثة أو ملاحظات قصيرة: استخدم قائمة نقطية بسيطة.
+- استخدم النص الغامق للتأكيد و inline code للمعرفات (IDs) والمسارات.
+- لا تضع روابط مطلقة (https://…) إلا إذا طلبها المستخدم صراحة.
+
 # اقتراحات ذكية
 - بعد كل خطوة، اقترح على المستخدم خطوة منطقية تالية.`;
 
@@ -52,6 +62,10 @@ type PublicToolEvent = {
   effect?: string;
   warning?: string;
   error?: string;
+  /** Sanitized tool input (what the agent asked Basecamp to do). */
+  input?: unknown;
+  /** Truncated, sanitized output preview (what Basecamp returned, or the error). */
+  output?: string;
 };
 
 function truncate(value: unknown, max = MAX_TOOL_OUTPUT_CHARS): string {
@@ -97,6 +111,17 @@ function errorResponse(code: string, status: number, detail?: string) {
 }
 
 export async function POST(req: NextRequest) {
+  try {
+    return await handlePost(req);
+  } catch (err: any) {
+    // Last-ditch: anything unhandled still returns JSON, never an HTML 500 page.
+    // Without this, the browser .json() crashes with "Unexpected token '<'…".
+    console.error('[agent] unhandled error:', err?.message ?? err);
+    return errorResponse('internal_error', 500, 'خطأ غير متوقع في الخادم.');
+  }
+}
+
+async function handlePost(req: NextRequest) {
   // 1) CSRF
   const originFail = assertSameOrigin(req);
   if (originFail) {
@@ -135,7 +160,7 @@ export async function POST(req: NextRequest) {
   const userText = body.message.trim();
   if (!userText) return errorResponse('empty_message', 400);
   if (userText.length > MAX_MESSAGE_CHARS) {
-    return errorResponse('message_too_long', 413, `حدّ الرسالة ${MAX_MESSAGE_CHARS} حرف.`);
+    return errorResponse('message_too_long', 413, 'الرسالة أطول من المسموح به. قسّم الطلب.');
   }
 
   const client = new Anthropic({ apiKey: env.anthropic.apiKey });
@@ -147,6 +172,7 @@ export async function POST(req: NextRequest) {
   await appendAgentMessage(sid, 'user', userBlocks);
 
   const toolEvents: PublicToolEvent[] = [];
+  const steps: string[] = [];
   let finalText = '';
   let stoppedEarly: string | null = null;
 
@@ -209,9 +235,17 @@ export async function POST(req: NextRequest) {
     const textBlocks = response.content.filter(
       (b): b is Extract<Anthropic.ContentBlock, { type: 'text' }> => b.type === 'text',
     );
-    if (textBlocks.length) finalText = textBlocks.map((b) => b.text).join('\n').trim();
+    const turnText = textBlocks.map((b) => b.text).join('\n').trim();
 
-    if (response.stop_reason !== 'tool_use') break;
+    if (response.stop_reason !== 'tool_use') {
+      // Final turn → this text is the assistant reply.
+      if (turnText) finalText = turnText;
+      break;
+    }
+
+    // Non-final turn: keep the narration (if any) as a visible "step" so the
+    // UI can show the reasoning between tool calls.
+    if (turnText) steps.push(turnText);
 
     const toolUses = response.content.filter(
       (b): b is Extract<Anthropic.ContentBlock, { type: 'tool_use' }> => b.type === 'tool_use',
@@ -224,6 +258,25 @@ export async function POST(req: NextRequest) {
       const risk = spec?.risk ?? 'readonly';
       const result = await dispatchTool(tu.name, tu.input, basecamp);
 
+      // Strip the `confirmed` boolean before shipping tool input to the client
+      // — it's an internal safety flag, not meaningful to a human reader.
+      const sanitizedInput =
+        tu.input && typeof tu.input === 'object' && !Array.isArray(tu.input)
+          ? Object.fromEntries(
+              Object.entries(tu.input as Record<string, unknown>).filter(([k]) => k !== 'confirmed'),
+            )
+          : tu.input;
+
+      let publicOutput: string | undefined;
+      if (result.kind === 'ok') {
+        publicOutput = truncate(result.output ?? '', PUBLIC_OUTPUT_PREVIEW_CHARS);
+      } else if (result.kind === 'error') {
+        publicOutput = truncate(
+          result.detail ? `${result.message}\n${result.detail}` : result.message,
+          PUBLIC_OUTPUT_PREVIEW_CHARS,
+        );
+      }
+
       toolEvents.push({
         name: tu.name,
         risk,
@@ -231,6 +284,8 @@ export async function POST(req: NextRequest) {
         effect: result.kind === 'preview' ? result.effect : undefined,
         warning: result.kind === 'preview' ? result.warning : undefined,
         error: result.kind === 'error' ? result.message : undefined,
+        input: sanitizedInput,
+        output: publicOutput,
       });
 
       // Audit every non-readonly invocation with its outcome (pre-confirm
@@ -270,6 +325,7 @@ export async function POST(req: NextRequest) {
         finalText ||
         'انتهت صلاحية الربط مع بيسكامب أثناء التنفيذ. يرجى إعادة الربط من صفحة الاتصال.',
       tools: toolEvents,
+      steps,
       reconnect: true,
     });
   }
@@ -283,6 +339,7 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({
     reply: finalText || 'تم.',
     tools: toolEvents,
+    steps,
     turn_limit_hit: stoppedEarly === 'max_turns',
   });
 }

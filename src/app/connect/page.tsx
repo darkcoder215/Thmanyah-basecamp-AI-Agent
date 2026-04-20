@@ -23,22 +23,9 @@ export default async function ConnectPage() {
         <p className="mb-4 text-sm uppercase tracking-[0.3em] text-[var(--fg-subtle)]">خطوة واحدة</p>
         <h1 className="font-display text-4xl leading-tight">اربط حسابك في بيسكامب</h1>
         <p className="mt-5 leading-loose text-[var(--fg-muted)]">
-          سنفتح نافذة تسجيل الدخول الرسمية من 37signals. بعد موافقتك، نحفظ رمز الوصول مُشفَّراً
-          على خوادم ثمانية فقط — لا يُرسَل إلى متصفحك في أي وقت، ويمكنك قطع الربط متى شئت.
+          سنفتح نافذة تسجيل الدخول الرسمية الخاصة ببيسكامب. بعد موافقتك، تعود إلى مَجال
+          جاهزاً للعمل. يمكنك قطع الربط متى شئت.
         </p>
-
-        <div className="mt-10 space-y-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)]/60 p-6">
-          <Row
-            label="المصادقة"
-            value="OAuth 2.0 (web_server) عبر launchpad.37signals.com"
-          />
-          <Row label="تخزين الرموز" value="AES-256-GCM داخل Supabase بمفتاح على الخادم" />
-          <Row
-            label="الملف الشخصي"
-            value="قراءة هوية المستخدم الأساسية + الحساب الرئيسي في Basecamp 4"
-          />
-          <Row label="الصلاحيات" value="كل ما يستطيع حسابك فعله على بيسكامب" />
-        </div>
 
         <div className="mt-10 flex flex-col gap-3 sm:flex-row">
           <a
@@ -57,14 +44,5 @@ export default async function ConnectPage() {
         </div>
       </section>
     </main>
-  );
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-start justify-between gap-6 border-b border-[var(--border)] pb-4 last:border-0 last:pb-0">
-      <span className="text-sm text-[var(--fg-subtle)]">{label}</span>
-      <span className="text-left text-sm text-[var(--fg)] font-text">{value}</span>
-    </div>
   );
 }
