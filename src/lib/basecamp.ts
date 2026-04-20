@@ -288,20 +288,74 @@ export class BasecampClient {
   }
 
   // People
+  //
+  // Per the official BC3 People API:
+  //   GET  /people.json                     → all people visible to current user
+  //   GET  /projects/:p/people.json         → people on a project
+  //   PUT  /projects/:p/people/users.json   → grant/revoke/create access
+  //   GET  /circles/people.json             → pingable people (unpaginated)
+  //   GET  /people/:id.json                 → a single person's profile
+  //   GET  /my/profile.json                 → current user's profile
+  //   PUT  /my/profile.json                 → update current user's profile
+  //   GET  /my/preferences.json             → current user's preferences
+  //   PUT  /my/preferences.json             → update preferences
   listPeopleInAccount() {
     return this.request<any[]>('GET', `/people.json`);
   }
   listPeopleInProject(projectId: number) {
     return this.request<any[]>('GET', `/projects/${projectId}/people.json`);
   }
+  listPingablePeople() {
+    return this.request<any[]>('GET', `/circles/people.json`);
+  }
+  getPerson(personId: number) {
+    return this.request<any>('GET', `/people/${personId}.json`);
+  }
+  /**
+   * Update who can access a project. `create` entries add brand-new people,
+   * which is a destructive/side-effectful operation — the agent gates it
+   * behind preview/confirm.
+   */
+  updateProjectAccess(
+    projectId: number,
+    changes: {
+      grant?: number[];
+      revoke?: number[];
+      create?: Array<{ name: string; email_address: string; title?: string; company_name?: string }>;
+    },
+  ) {
+    return this.request<any>('PUT', `/projects/${projectId}/people/users.json`, changes);
+  }
   grantPeopleToProject(projectId: number, grantIds: number[]) {
-    return this.request<any>('PUT', `/projects/${projectId}/people/users.json`, { grant: grantIds });
+    return this.updateProjectAccess(projectId, { grant: grantIds });
   }
   revokePeopleFromProject(projectId: number, revokeIds: number[]) {
-    return this.request<any>('PUT', `/projects/${projectId}/people/users.json`, { revoke: revokeIds });
+    return this.updateProjectAccess(projectId, { revoke: revokeIds });
   }
   me() {
     return this.request<any>('GET', `/my/profile.json`);
+  }
+  updateMyProfile(patch: {
+    name?: string;
+    email_address?: string;
+    title?: string;
+    bio?: string;
+    location?: string;
+    time_zone_name?: string;
+    first_week_day?: 0 | 1;
+    time_format?: 'twelve_hour' | 'twenty_four_hour';
+  }) {
+    return this.request<any>('PUT', `/my/profile.json`, patch);
+  }
+  myPreferences() {
+    return this.request<any>('GET', `/my/preferences.json`);
+  }
+  updateMyPreferences(patch: {
+    time_zone_name?: string;
+    first_week_day?: 'Sunday' | 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday';
+    time_format?: 'twelve_hour' | 'twenty_four_hour';
+  }) {
+    return this.request<any>('PUT', `/my/preferences.json`, { person: patch });
   }
 
   // Todo sets & lists

@@ -37,6 +37,22 @@ create table if not exists agent_messages (
 create index if not exists idx_agent_messages_sid_created
   on agent_messages (sid, created_at);
 
+-- ───────── Agent bookmarks (pinned memory) ─────────
+-- User-saved messages the agent can reference later. One row per bookmark.
+-- Cascaded on session deletion so bookmarks never outlive their owning
+-- session. Soft cap of 100 rows/session is enforced in vault.ts.
+create table if not exists agent_bookmarks (
+  id         uuid primary key default gen_random_uuid(),
+  sid        text not null references basecamp_sessions(sid) on delete cascade,
+  content    text not null,
+  note       text,
+  source     text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_agent_bookmarks_sid_created
+  on agent_bookmarks (sid, created_at desc);
+
 -- ───────── Audit log ─────────
 -- Append-only. Never exposed via any public route. Keeps hashed IPs and
 -- anonymized metadata only — no secrets, no plaintext Basecamp IDs beyond
@@ -93,6 +109,7 @@ $$;
 
 alter table basecamp_sessions enable row level security;
 alter table agent_messages    enable row level security;
+alter table agent_bookmarks   enable row level security;
 alter table audit_log         enable row level security;
 alter table rate_limits       enable row level security;
 
@@ -101,6 +118,9 @@ create policy "deny all" on basecamp_sessions for all using (false) with check (
 
 drop policy if exists "deny all" on agent_messages;
 create policy "deny all" on agent_messages for all using (false) with check (false);
+
+drop policy if exists "deny all" on agent_bookmarks;
+create policy "deny all" on agent_bookmarks for all using (false) with check (false);
 
 drop policy if exists "deny all" on audit_log;
 create policy "deny all" on audit_log for all using (false) with check (false);

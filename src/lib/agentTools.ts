@@ -159,6 +159,390 @@ const SPECS: ToolSpec[] = [
     validator: z.object({ project_id: idSchema, person_ids: z.array(idSchema).min(1).max(200) }),
     run: (i, c) => c.revokePeopleFromProject(i.project_id, i.person_ids),
   },
+  {
+    name: 'list_pingable_people',
+    risk: 'readonly',
+    description:
+      'اعرض جميع الأشخاص القابلين للمراسلة (ping) في الحساب. مفيدة قبل إرسال رسالة مباشرة أو معرفة من متاح للتواصل.',
+    effect: () => 'سأعرض الأشخاص القابلين للمراسلة.',
+    schema: { type: 'object', properties: {} },
+    validator: z.object({}).passthrough(),
+    run: (_i, c) => c.listPingablePeople(),
+  },
+  {
+    name: 'get_person',
+    risk: 'readonly',
+    description:
+      'اجلب الملف الشخصي لشخص واحد عبر معرّفه (اسم، بريد، مسمّى وظيفي، شركة، نطاق زمني، صلاحيات).',
+    effect: (i) => `سأجلب ملف الشخص ${i.person_id}.`,
+    schema: {
+      type: 'object',
+      properties: { person_id: { type: 'integer' } },
+      required: ['person_id'],
+    },
+    validator: z.object({ person_id: idSchema }),
+    run: (i, c) => c.getPerson(i.person_id),
+  },
+  {
+    name: 'find_person',
+    risk: 'readonly',
+    description:
+      'ابحث عن شخص بالاسم أو البريد الإلكتروني. يعيد أفضل المطابقات مع معرفاتهم حتى تسأل المستخدم عن الشخص الصحيح إذا كان هناك تطابق متعدد. استخدمها قبل أي إجراء يتطلب person_id عندما يُذكر اسم فقط.',
+    effect: (i) => `سأبحث عن «${i.query}» في الأشخاص.`,
+    schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', minLength: 1, maxLength: 200 },
+        limit: { type: 'integer', minimum: 1, maximum: 25 },
+      },
+      required: ['query'],
+    },
+    validator: z.object({
+      query: z.string().min(1).max(200),
+      limit: z.number().int().positive().max(25).optional(),
+    }),
+    run: async (i, c) => {
+      const q = i.query.trim().toLowerCase();
+      const people = await c.listPeopleInAccount();
+      const scored = people
+        .map((p: any) => {
+          const name = String(p?.name ?? '').toLowerCase();
+          const email = String(p?.email_address ?? '').toLowerCase();
+          const title = String(p?.title ?? '').toLowerCase();
+          // Rough ranking: exact name > name prefix > name contains > email contains > title contains.
+          let score = 0;
+          if (name === q) score = 100;
+          else if (name.startsWith(q)) score = 80;
+          else if (name.includes(q)) score = 60;
+          else if (email.includes(q)) score = 50;
+          else if (title.includes(q)) score = 20;
+          return { p, score };
+        })
+        .filter((x) => x.score > 0)
+        .sort((a, b) => b.score - a.score);
+      const limit = i.limit ?? 10;
+      return {
+        query: i.query,
+        match_count: scored.length,
+        candidates: scored.slice(0, limit).map(({ p, score }) => ({
+          id: p.id,
+          name: p.name,
+          email_address: p.email_address,
+          title: p.title ?? null,
+          company: p.company?.name ?? null,
+          avatar_url: p.avatar_url ?? null,
+          score,
+        })),
+        note:
+          scored.length === 0
+            ? 'لا يوجد أي شخص يطابق البحث. اطلب من المستخدم اسماً آخر أو بريداً.'
+            : scored.length === 1
+              ? 'تطابق واحد فقط — يمكنك المتابعة بعد تأكيد المستخدم بسرعة.'
+              : 'أكثر من مرشح — اعرض القائمة واطلب من المستخدم اختيار الشخص الصحيح قبل أي إجراء.',
+      };
+    },
+  },
+  {
+    name: 'update_project_access',
+    risk: 'destructive',
+    description:
+      'حدِّث صلاحية الوصول لمشروع: منح (grant) أو إزالة (revoke) لمعرفات موجودة، أو إنشاء (create) أشخاص جدد بالاسم والبريد. الإنشاء يضيف مستخدمين جدد للحساب ويرسل دعوات.',
+    effect: (i) => {
+      const parts: string[] = [];
+      if (i.grant?.length) parts.push(`منح ${i.grant.length} شخصاً`);
+      if (i.revoke?.length) parts.push(`إزالة ${i.revoke.length} شخصاً`);
+      if (i.create?.length) parts.push(`إنشاء ${i.create.length} عضواً جديداً ودعوتهم`);
+      return `في المشروع ${i.project_id}: ${parts.join(' و') || 'لا تغيير'}.`;
+    },
+    schema: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'integer' },
+        grant: { type: 'array', items: { type: 'integer' } },
+        revoke: { type: 'array', items: { type: 'integer' } },
+        create: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', minLength: 1, maxLength: 200 },
+              email_address: { type: 'string', minLength: 3, maxLength: 320 },
+              title: { type: 'string', maxLength: 200 },
+              company_name: { type: 'string', maxLength: 200 },
+            },
+            required: ['name', 'email_address'],
+          },
+        },
+      },
+      required: ['project_id'],
+    },
+    validator: z
+      .object({
+        project_id: idSchema,
+        grant: z.array(idSchema).max(200).optional(),
+        revoke: z.array(idSchema).max(200).optional(),
+        create: z
+          .array(
+            z.object({
+              name: z.string().min(1).max(200),
+              email_address: z.string().email().max(320),
+              title: z.string().max(200).optional(),
+              company_name: z.string().max(200).optional(),
+            }),
+          )
+          .max(50)
+          .optional(),
+      })
+      .refine((v) => (v.grant?.length ?? 0) + (v.revoke?.length ?? 0) + (v.create?.length ?? 0) > 0, {
+        message: 'يجب تحديد grant أو revoke أو create واحداً على الأقل.',
+      }),
+    run: (i, c) =>
+      c.updateProjectAccess(i.project_id, {
+        grant: i.grant,
+        revoke: i.revoke,
+        create: i.create,
+      }),
+  },
+  {
+    name: 'person_activity_report',
+    risk: 'readonly',
+    description:
+      'أنشئ تقريراً شاملاً عن نشاط شخص معين: ملفه الشخصي، المشاريع المشترك بها، المهام المُسندة (نشطة/متأخرة)، وإحصائيات أساسية. مرِّر person_id (استخدم find_person إن كان لديك الاسم فقط). يستبعد التعليقات بشكل افتراضي لأنها تتطلب استدعاءات إضافية.',
+    effect: (i) =>
+      `سأُجمِّع تقرير نشاط شامل عن الشخص ${i.person_id}${i.include_comments_from_projects?.length ? ` بما فيه عينة تعليقات من ${i.include_comments_from_projects.length} مشروعاً` : ''}.`,
+    schema: {
+      type: 'object',
+      properties: {
+        person_id: { type: 'integer' },
+        include_comments_from_projects: {
+          type: 'array',
+          items: { type: 'integer' },
+          description:
+            'اختياري: قائمة معرفات مشاريع لجلب عينة تعليقات من رسائل/مهام الشخص. يزيد عدد الاستدعاءات — استخدمه باعتدال.',
+        },
+      },
+      required: ['person_id'],
+    },
+    validator: z.object({
+      person_id: idSchema,
+      include_comments_from_projects: z.array(idSchema).max(5).optional(),
+    }),
+    run: async (i, c) => {
+      const personId: number = i.person_id;
+      // Fan out the three primary pulls in parallel. Each is allowed to fail
+      // independently — a partial report is better than no report.
+      const [profileR, assignmentsR, projectsR] = await Promise.allSettled([
+        c.getPerson(personId),
+        c.reportTodosAssignedToPerson(personId, 'bucket'),
+        c.listProjects('active'),
+      ]);
+
+      const profile = profileR.status === 'fulfilled' ? profileR.value : null;
+      const assignmentsPayload: any =
+        assignmentsR.status === 'fulfilled' ? assignmentsR.value : null;
+      const allProjects: any[] =
+        projectsR.status === 'fulfilled' && Array.isArray(projectsR.value) ? projectsR.value : [];
+
+      // Projects the person has access to — determined by listPeopleInProject
+      // for a handful of active projects (capped to avoid N+1 blowups).
+      const PROJECT_ACCESS_LOOKUP_CAP = 30;
+      const lookupProjects = allProjects.slice(0, PROJECT_ACCESS_LOOKUP_CAP);
+      const memberships = await Promise.allSettled(
+        lookupProjects.map(async (p) => {
+          const people = await c.listPeopleInProject(p.id);
+          const hit = Array.isArray(people) ? people.find((x: any) => x?.id === personId) : null;
+          return hit ? { id: p.id, name: p.name } : null;
+        }),
+      );
+      const projectsOn = memberships
+        .map((r) => (r.status === 'fulfilled' ? r.value : null))
+        .filter((x): x is { id: number; name: string } => x !== null);
+
+      // Flatten the assignments grouped by bucket into a single list + per-project stats.
+      const todosByProject: Record<string, { bucket_name: string; count: number; overdue: number; due_soon: number }> = {};
+      let totalTodos = 0;
+      let overdueCount = 0;
+      let dueSoonCount = 0;
+      const today = new Date().toISOString().slice(0, 10);
+      const in7Days = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const sampledTodos: Array<{ id: number; title: string; due_on: string | null; bucket: string }> = [];
+      const buckets = assignmentsPayload?.todos ?? [];
+      if (Array.isArray(buckets)) {
+        for (const group of buckets) {
+          const bucketName: string = group?.bucket?.name ?? group?.name ?? 'غير مُسمّى';
+          const bucketKey = String(group?.bucket?.id ?? bucketName);
+          const todos: any[] = Array.isArray(group?.todos) ? group.todos : [];
+          let od = 0;
+          let ds = 0;
+          for (const t of todos) {
+            totalTodos++;
+            const due = t?.due_on ?? null;
+            if (due && due < today) {
+              overdueCount++;
+              od++;
+            } else if (due && due <= in7Days) {
+              dueSoonCount++;
+              ds++;
+            }
+            if (sampledTodos.length < 15) {
+              sampledTodos.push({ id: t?.id, title: t?.title ?? t?.content ?? '(بلا عنوان)', due_on: due, bucket: bucketName });
+            }
+          }
+          todosByProject[bucketKey] = { bucket_name: bucketName, count: todos.length, overdue: od, due_soon: ds };
+        }
+      }
+
+      // Optional comments sample — only pulled when the caller asks for it.
+      // For each requested project we grab its message_board's latest messages
+      // and list comments on the first few, filtering to this person. Cheap but
+      // shallow; the model can dig deeper with list_comments directly.
+      const commentsSamples: Array<{
+        project_id: number;
+        project_name?: string;
+        person_comments: Array<{ id: number; recording_id: number; created_at: string; excerpt: string }>;
+      }> = [];
+      const commentProjectIds: number[] = i.include_comments_from_projects ?? [];
+      if (commentProjectIds.length) {
+        for (const projectId of commentProjectIds) {
+          try {
+            const project = await c.getProject(projectId);
+            const projectName = project?.name;
+            const dock: any[] = Array.isArray(project?.dock) ? project.dock : [];
+            const board = dock.find((d) => d?.name === 'message_board' && d?.enabled);
+            const personComments: Array<{ id: number; recording_id: number; created_at: string; excerpt: string }> = [];
+            if (board?.id) {
+              const messages = await c.listMessages(projectId, board.id);
+              const recentMessages = Array.isArray(messages) ? messages.slice(0, 5) : [];
+              for (const msg of recentMessages) {
+                try {
+                  const comments = await c.listComments(projectId, msg.id);
+                  if (Array.isArray(comments)) {
+                    for (const cm of comments) {
+                      if (cm?.creator?.id === personId) {
+                        const raw = String(cm?.content ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+                        personComments.push({
+                          id: cm.id,
+                          recording_id: msg.id,
+                          created_at: cm.created_at,
+                          excerpt: raw.slice(0, 200),
+                        });
+                      }
+                    }
+                  }
+                } catch {
+                  /* skip individual failures */
+                }
+                if (personComments.length >= 20) break;
+              }
+            }
+            commentsSamples.push({ project_id: projectId, project_name: projectName, person_comments: personComments });
+          } catch {
+            commentsSamples.push({ project_id: projectId, person_comments: [] });
+          }
+        }
+      }
+
+      // Response interaction rate computed only from what we sampled.
+      const sampledComments = commentsSamples.flatMap((s) => s.person_comments);
+      const avgCommentLen = sampledComments.length
+        ? Math.round(
+            sampledComments.reduce((sum, c) => sum + c.excerpt.length, 0) / sampledComments.length,
+          )
+        : null;
+
+      return {
+        profile,
+        projects: {
+          checked: lookupProjects.length,
+          total_active_on_account: allProjects.length,
+          member_of: projectsOn,
+          truncated: allProjects.length > PROJECT_ACCESS_LOOKUP_CAP,
+        },
+        todos: {
+          total_active: totalTodos,
+          overdue: overdueCount,
+          due_within_7_days: dueSoonCount,
+          by_project: Object.values(todosByProject),
+          sample: sampledTodos,
+        },
+        comments_sample: commentsSamples,
+        stats: {
+          active_todos: totalTodos,
+          overdue_todos: overdueCount,
+          overdue_ratio: totalTodos ? Math.round((overdueCount / totalTodos) * 100) / 100 : 0,
+          projects_member_of: projectsOn.length,
+          sampled_comments: sampledComments.length,
+          avg_comment_length_chars: avgCommentLen,
+        },
+        instruction:
+          'قدِّم التقرير للمستخدم في جدول عربي مع عناوين واضحة: الملف الشخصي، المشاريع، المهام، ثم ملخص تحليلي قصير (معدّل المهام المتأخرة، المشاركة في التعليقات). إذا كان التعليقات فارغاً، اذكر أنه يمكن تحسين الدقة بتحديد مشاريع في include_comments_from_projects.',
+      };
+    },
+  },
+  {
+    name: 'update_my_profile',
+    risk: 'write',
+    description: 'حدِّث الملف الشخصي للمستخدم الحالي (الاسم، المسمّى، النبذة، الموقع، المنطقة الزمنية…).',
+    effect: (i) => `سأُحدّث حقول ملفي الشخصي: ${Object.keys(i).join('، ')}.`,
+    schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', maxLength: 200 },
+        email_address: { type: 'string', maxLength: 320 },
+        title: { type: 'string', maxLength: 200 },
+        bio: { type: 'string', maxLength: 2000 },
+        location: { type: 'string', maxLength: 200 },
+        time_zone_name: { type: 'string', maxLength: 200 },
+      },
+    },
+    validator: z
+      .object({
+        name: z.string().max(200).optional(),
+        email_address: z.string().email().max(320).optional(),
+        title: z.string().max(200).optional(),
+        bio: z.string().max(2000).optional(),
+        location: z.string().max(200).optional(),
+        time_zone_name: z.string().max(200).optional(),
+      })
+      .refine((v) => Object.keys(v).length > 0, { message: 'لا توجد حقول للتحديث.' }),
+    run: (i, c) => c.updateMyProfile(i),
+  },
+  {
+    name: 'update_my_preferences',
+    risk: 'write',
+    description: 'حدِّث تفضيلات المستخدم الحالي: المنطقة الزمنية، أول أيام الأسبوع، نظام الوقت.',
+    effect: (i) => `سأُحدّث تفضيلاتي: ${Object.keys(i).join('، ')}.`,
+    schema: {
+      type: 'object',
+      properties: {
+        time_zone_name: { type: 'string', maxLength: 200 },
+        first_week_day: {
+          type: 'string',
+          enum: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+        },
+        time_format: { type: 'string', enum: ['twelve_hour', 'twenty_four_hour'] },
+      },
+    },
+    validator: z
+      .object({
+        time_zone_name: z.string().max(200).optional(),
+        first_week_day: z
+          .enum(['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'])
+          .optional(),
+        time_format: z.enum(['twelve_hour', 'twenty_four_hour']).optional(),
+      })
+      .refine((v) => Object.keys(v).length > 0, { message: 'لا توجد حقول للتحديث.' }),
+    run: (i, c) => c.updateMyPreferences(i),
+  },
+  {
+    name: 'my_preferences',
+    risk: 'readonly',
+    description: 'اعرض تفضيلات المستخدم الحالي (المنطقة الزمنية، نظام الوقت…).',
+    effect: () => 'سأجلب تفضيلاتي.',
+    schema: { type: 'object', properties: {} },
+    validator: z.object({}).passthrough(),
+    run: (_i, c) => c.myPreferences(),
+  },
 
   // ───────── Todo sets & lists ─────────
   {

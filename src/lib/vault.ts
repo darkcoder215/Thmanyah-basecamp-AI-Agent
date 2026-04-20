@@ -173,3 +173,77 @@ export async function loadAgentHistory(
   if (error) throw new Error(`Supabase history failed: ${error.message}`);
   return (data ?? []) as Array<{ role: 'user' | 'assistant' | 'tool'; content: unknown; created_at: string }>;
 }
+
+// ───────── Bookmarks ─────────
+
+export type StoredBookmark = {
+  id: string;
+  content: string;
+  note: string | null;
+  source: string | null;
+  createdAt: string;
+};
+
+const MAX_BOOKMARKS_PER_SESSION = 100;
+const MAX_BOOKMARK_CHARS = 8_000;
+const MAX_NOTE_CHARS = 500;
+
+export async function saveBookmark(
+  sid: string,
+  content: string,
+  note?: string | null,
+  source?: string | null,
+): Promise<StoredBookmark> {
+  const trimmed = content.slice(0, MAX_BOOKMARK_CHARS);
+  const trimmedNote = note ? note.slice(0, MAX_NOTE_CHARS) : null;
+  const trimmedSource = source ? source.slice(0, 64) : null;
+
+  // Hard cap per session. Cheap count query; the UI also trims client-side.
+  const { count } = await supabaseAdmin()
+    .from('agent_bookmarks')
+    .select('id', { count: 'exact', head: true })
+    .eq('sid', sid);
+  if ((count ?? 0) >= MAX_BOOKMARKS_PER_SESSION) {
+    throw new Error(`bookmark limit reached (${MAX_BOOKMARKS_PER_SESSION})`);
+  }
+
+  const { data, error } = await supabaseAdmin()
+    .from('agent_bookmarks')
+    .insert({ sid, content: trimmed, note: trimmedNote, source: trimmedSource })
+    .select('id, content, note, source, created_at')
+    .single();
+  if (error) throw new Error(`Supabase bookmark save failed: ${error.message}`);
+  return {
+    id: data.id,
+    content: data.content,
+    note: data.note,
+    source: data.source,
+    createdAt: data.created_at,
+  };
+}
+
+export async function listBookmarks(sid: string, limit = 50): Promise<StoredBookmark[]> {
+  const { data, error } = await supabaseAdmin()
+    .from('agent_bookmarks')
+    .select('id, content, note, source, created_at')
+    .eq('sid', sid)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(`Supabase bookmark list failed: ${error.message}`);
+  return (data ?? []).map((r: any) => ({
+    id: r.id,
+    content: r.content,
+    note: r.note,
+    source: r.source,
+    createdAt: r.created_at,
+  }));
+}
+
+export async function deleteBookmark(sid: string, id: string): Promise<void> {
+  const { error } = await supabaseAdmin()
+    .from('agent_bookmarks')
+    .delete()
+    .eq('sid', sid)
+    .eq('id', id);
+  if (error) throw new Error(`Supabase bookmark delete failed: ${error.message}`);
+}

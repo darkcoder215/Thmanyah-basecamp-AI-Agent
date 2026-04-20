@@ -3,7 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { BasecampClient } from '@/lib/basecamp';
 import { env } from '@/lib/env';
 import { readSessionId } from '@/lib/session';
-import { appendAgentMessage, loadAgentHistory } from '@/lib/vault';
+import { appendAgentMessage, loadAgentHistory, listBookmarks } from '@/lib/vault';
 import { AGENT_TOOLS, dispatchTool, findSpec } from '@/lib/agentTools';
 import { clearAgentHistory, loadWindowedHistory } from '@/lib/memory';
 import { assertSameOrigin } from '@/lib/csrf';
@@ -15,7 +15,12 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
 const MODEL = 'claude-opus-4-7';
-const MAX_TURNS = 8;
+// Raised from 8 → 20 so bulk multi-step flows (e.g. creating several todos across
+// different assignees through the preview/confirm cycle, or generating a
+// person_activity_report after find_person + confirmation) don't get truncated
+// mid-workflow. Each preview/confirm pair counts as 2 turns, so 20 buys ~9
+// independent confirmed write actions plus some readonly lookups.
+const MAX_TURNS = 20;
 const MAX_TOOL_OUTPUT_CHARS = 8000;
 /** Tighter cap for what we ship to the browser — tool outputs can be huge. */
 const PUBLIC_OUTPUT_PREVIEW_CHARS = 2000;
@@ -31,6 +36,18 @@ const SYSTEM_PROMPT = `أنت "مجال"، وكيل ثمانية الذكي لإ
 - للوحات كانبان (kanban_board): استخدم get_card_table للاطّلاع على الأعمدة، ثم list_cards_in_column لعرض البطاقات، أو create_card / move_card / update_card للتعديل.
 - لخّص النتائج في قائمة عربية موجزة، لا تُظهر JSON خاماً.
 
+# الأشخاص (People)
+- عند ذكر اسم شخص فقط (بدون معرف): استدعِ find_person أولاً. إذا أعطى نتيجة واحدة واضحة، اعرضها للتأكيد السريع. إذا تعدّدت النتائج، اعرض القائمة واطلب من المستخدم اختيار الشخص الصحيح قبل أي إجراء.
+- لتقرير شامل عن نشاط شخص (المشاريع، المهام المُسندة، التعليقات، الإحصائيات): استدعِ person_activity_report. إذا أراد المستخدم تحليل تعليقاته، مرّر include_comments_from_projects بقائمة معرفات مشاريع (قلّل العدد — كل مشروع يتطلّب استدعاءات إضافية).
+- list_pingable_people يعرض الأشخاص المتاحين للمراسلة.
+- update_project_access لإجراء التغييرات الثلاثة (منح/إزالة/إنشاء) في استدعاء واحد. إنشاء أشخاص جدد يدعوهم ببريد حقيقي — تعامل معه كإجراء لا رجعة فيه بسهولة.
+
+# المهام متعددة الخطوات والتنفيذ الجماعي
+- عندما يُطلب تنفيذ إجراءات مستقلة متعددة في خطوة واحدة (مثال: إسناد 5 مهام مختلفة لـ 5 أشخاص مختلفين)، استدعِ الأدوات المناسبة في رسالة واحدة (parallel tool_use blocks). الخادم يعالج كل استدعاء على حدة ويعيد نتائجها لك في الدورة التالية.
+- كل أداة تغييرية تتطلّب دورة preview ثم دورة confirmed. عند تجميع عدة إجراءات مستقلة، أصدر جميع الـ previews في دورة واحدة. ثم اعرض للمستخدم ملخصاً شاملاً (جدول: من، ماذا، متى) واطلب تأكيداً واحداً للجميع دفعة واحدة. عند التأكيد، أصدر جميع استدعاءات confirmed=true في دورة واحدة.
+- إذا فشل جزء من التنفيذ، أكمل الباقي، ثم اعرض تقريراً صريحاً: ما تمّ وما فشل ولماذا، مع اقتراح لإعادة المحاولة للفاشل فقط.
+- عند معالجة ملف مرفق (CSV) بأعمدة «الاسم/البريد/المهمة»: استخدم find_person أو listPeopleInAccount لتحويل الأسماء إلى IDs، ثم اجمع مهام الإنشاء في دفعة واحدة، ثم استدعِ create_todo مرة لكل صف في نفس الدورة.
+
 # السلامة (بالغة الأهمية)
 - قبل أي أداة تُحدِث تغييراً (إنشاء، تحديث، إسناد، نشر، تعليق، Campfire) أو أي إجراء لا رجعة فيه (حذف، إزالة عضو، نقل إلى المهملات):
   1) استدعِ الأداة دون confirmed. ستحصل على معاينة رسمية (preview) توضّح تأثير الإجراء بدقة.
@@ -40,10 +57,16 @@ const SYSTEM_PROMPT = `أنت "مجال"، وكيل ثمانية الذكي لإ
 - إذا رفض المستخدم أو تردّد: لا تنفّذ، واقترح بديلاً أخف.
 - إذا فشلت أداة، اعرض السبب بالعربية (مثل: انتهاء صلاحية الربط، عدم وجود صلاحيات، عنصر غير موجود) واقترح الخطوة التالية بدلاً من المحاولة مجدداً بلا تعديل.
 
+# الإشارات المحفوظة (Bookmarks / ذاكرة المستخدم)
+- يمكن للمستخدم حفظ أي من إجاباتك كإشارة مرجعية. عند توفّر إشارات محفوظة، ستُحقَن قبل السياق العادي تحت عنوان «إشارات المستخدم المحفوظة».
+- تعامل معها كذاكرة طويلة الأمد: إذا كان سؤال المستخدم يشير إلى شيء «سابق» أو «محفوظ» أو «كما قلنا»، راجع هذه الإشارات أولاً.
+- لا تُظهر هذه الإشارات للمستخدم إلا إذا طلب ذلك صراحة.
+
 # تنسيق الإجابة (Markdown)
 - استخدم Markdown في إجاباتك. لا تعرض JSON خاماً أبداً.
 - عرض قائمة مشاريع/مهام/أعضاء ≥ ثلاثة عناصر: استخدم جدول Markdown بأعمدة واضحة بالعربية (مثال للمهام: | المهمة | المسند إليه | تاريخ الاستحقاق |). ضع صف الفاصل "|---|---|---|" أسفل العنوان.
 - لملف شخصي أو مشروع واحد: استخدم قائمة «**حقل**: قيمة» سطر لكل حقل (الاسم، البريد، الدور، …).
+- لتقرير شخص (person_activity_report): قدّمه بعناوين فرعية — الملف الشخصي، المشاريع، المهام (مع جدول)، الإحصائيات، ثم اقتراحات للمتابعة.
 - لعناصر أقل من ثلاثة أو ملاحظات قصيرة: استخدم قائمة نقطية بسيطة.
 - استخدم النص الغامق للتأكيد و inline code للمعرفات (IDs) والمسارات.
 - لا تضع روابط مطلقة (https://…) إلا إذا طلبها المستخدم صراحة.
@@ -168,6 +191,27 @@ async function handlePost(req: NextRequest) {
 
   const messages = await loadWindowedHistory(sid, HISTORY_TOKEN_BUDGET);
 
+  // Pinned bookmarks — always injected as part of the system prompt so the
+  // model can reference them in any turn. Capped hard so a runaway number of
+  // bookmarks can't blow the context budget.
+  const MAX_PINNED_BOOKMARKS = 20;
+  const MAX_BOOKMARK_CHARS_IN_PROMPT = 600;
+  let pinnedBookmarksBlock = '';
+  try {
+    const bms = await listBookmarks(sid, MAX_PINNED_BOOKMARKS);
+    if (bms.length) {
+      const lines = bms.map((b, idx) => {
+        const snippet = b.content.slice(0, MAX_BOOKMARK_CHARS_IN_PROMPT);
+        const note = b.note ? ` — ملاحظة: ${b.note}` : '';
+        const trailer = b.content.length > MAX_BOOKMARK_CHARS_IN_PROMPT ? ' […]' : '';
+        return `[${idx + 1}] ${snippet}${trailer}${note}`;
+      });
+      pinnedBookmarksBlock = `\n\n# إشارات المستخدم المحفوظة (${bms.length})\nهذه ذاكرة طويلة الأمد يختارها المستخدم. راجعها عند أي إشارة لـ«قلنا سابقاً» أو «احفظ». لا تعرضها ما لم يُطلب.\n\n${lines.join('\n\n')}`;
+    }
+  } catch {
+    // Bookmarks are optional; never block a turn over them.
+  }
+
   const userBlocks: ContentBlock[] = [{ type: 'text', text: userText }];
   messages.push({ role: 'user', content: userBlocks as any });
   await appendAgentMessage(sid, 'user', userBlocks);
@@ -189,6 +233,9 @@ async function handlePost(req: NextRequest) {
             text: SYSTEM_PROMPT,
             cache_control: { type: 'ephemeral' },
           },
+          ...(pinnedBookmarksBlock
+            ? [{ type: 'text', text: pinnedBookmarksBlock } as any]
+            : []),
         ] as any,
         tools: AGENT_TOOLS,
         messages,

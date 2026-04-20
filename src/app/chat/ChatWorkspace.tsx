@@ -139,6 +139,14 @@ type Attachment = {
   markdown: string;
 };
 
+type Bookmark = {
+  id: string;
+  content: string;
+  note: string | null;
+  source: string | null;
+  createdAt: string;
+};
+
 export function ChatWorkspace({
   initialTimeline,
   accountName,
@@ -153,6 +161,8 @@ export function ChatWorkspace({
   const [suggestions, setSuggestions] = useState<string[]>(FALLBACK_SUGGESTIONS);
   const [lastPendingAction, setLastPendingAction] = useState<ToolEvent | null>(null);
   const [attachment, setAttachment] = useState<Attachment | null>(null);
+  const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
+  const [bookmarkError, setBookmarkError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -172,6 +182,69 @@ export function ChatWorkspace({
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  const refreshBookmarks = useCallback(async () => {
+    try {
+      const r = await fetch('/api/bookmarks');
+      if (!r.ok) return;
+      const d = await r.json();
+      setBookmarks(Array.isArray(d?.bookmarks) ? d.bookmarks : []);
+    } catch {
+      /* ignore — bookmarks are not worth blocking on */
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshBookmarks();
+  }, [refreshBookmarks]);
+
+  const saveAsBookmark = useCallback(
+    async (content: string, source?: string) => {
+      setBookmarkError(null);
+      try {
+        const res = await fetch('/api/bookmarks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ content, source: source ?? null }),
+        });
+        if (!res.ok) {
+          const d = await res.json().catch(() => null);
+          setBookmarkError(
+            d?.detail ? `تعذّر الحفظ: ${d.detail}` : 'تعذّر حفظ الإشارة المرجعية.',
+          );
+          return;
+        }
+        await refreshBookmarks();
+      } catch {
+        setBookmarkError('تعذّر الوصول إلى الخادم.');
+      }
+    },
+    [refreshBookmarks],
+  );
+
+  const removeBookmark = useCallback(
+    async (id: string) => {
+      setBookmarkError(null);
+      try {
+        const res = await fetch(`/api/bookmarks?id=${encodeURIComponent(id)}`, {
+          method: 'DELETE',
+        });
+        if (!res.ok) {
+          setBookmarkError('تعذّر حذف الإشارة.');
+          return;
+        }
+        await refreshBookmarks();
+      } catch {
+        setBookmarkError('تعذّر الوصول إلى الخادم.');
+      }
+    },
+    [refreshBookmarks],
+  );
+
+  const insertBookmarkAsContext = useCallback((b: Bookmark) => {
+    const snippet = `> من إشاراتي المحفوظة:\n> ${b.content.replace(/\n/g, '\n> ')}\n\n`;
+    setInput((prev) => snippet + prev);
   }, []);
 
   const send = useCallback(
@@ -361,7 +434,7 @@ export function ChatWorkspace({
           ) : (
             <div className="space-y-6">
               {timeline.map((t, i) => (
-                <Bubble key={i} turn={t} />
+                <Bubble key={i} turn={t} onBookmark={saveAsBookmark} />
               ))}
               {lastPendingAction ? (
                 <PreviewCard
@@ -484,6 +557,46 @@ export function ChatWorkspace({
           </ul>
         </Panel>
 
+        <Panel title="الإشارات المحفوظة">
+          {bookmarkError ? (
+            <p className="mb-2 rounded-md bg-[var(--danger)]/10 px-3 py-2 text-xs text-[var(--danger)]">
+              {bookmarkError}
+            </p>
+          ) : null}
+          {bookmarks.length === 0 ? (
+            <p className="text-xs leading-loose text-[var(--fg-subtle)]">
+              احفظ أي إجابة مهمة من مَجال بالضغط على «احفظ» فوق الرد، لتظهر هنا ويمكن إدراجها كسياق في أي محادثة لاحقة.
+            </p>
+          ) : (
+            <ul className="space-y-2 text-sm">
+              {bookmarks.map((b) => (
+                <li
+                  key={b.id}
+                  className="rounded-lg border border-[var(--border)] bg-[var(--bg)]/40 p-3"
+                >
+                  <p className="line-clamp-3 text-xs leading-relaxed text-[var(--fg-muted)]">
+                    {b.content}
+                  </p>
+                  <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-[var(--fg-subtle)]">
+                    <button
+                      onClick={() => insertBookmarkAsContext(b)}
+                      className="rounded-md border border-[var(--border)] px-2 py-0.5 transition hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                    >
+                      إدراج
+                    </button>
+                    <button
+                      onClick={() => removeBookmark(b.id)}
+                      className="rounded-md border border-transparent px-2 py-0.5 transition hover:border-[var(--danger)]/50 hover:text-[var(--danger)]"
+                    >
+                      حذف
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Panel>
+
         <Panel title="التأكيد قبل التنفيذ">
           <ul className="space-y-3 text-sm leading-loose text-[var(--fg-muted)]">
             <li>
@@ -511,7 +624,15 @@ export function ChatWorkspace({
   );
 }
 
-function Bubble({ turn }: { turn: Turn }) {
+function Bubble({
+  turn,
+  onBookmark,
+}: {
+  turn: Turn;
+  onBookmark?: (content: string, source?: string) => void;
+}) {
+  const [saved, setSaved] = useState(false);
+
   if (turn.role === 'system') {
     return (
       <div className="mx-auto max-w-xl rounded-lg border border-[var(--border)] bg-[var(--surface)]/60 px-4 py-3 text-center text-xs text-[var(--fg-subtle)]">
@@ -523,6 +644,7 @@ function Bubble({ turn }: { turn: Turn }) {
   const tools = 'tools' in turn ? turn.tools ?? [] : [];
   const steps = 'steps' in turn ? turn.steps ?? [] : [];
   const hasTrace = !mine && (tools.length > 0 || steps.length > 0);
+  const canBookmark = !mine && !!turn.text && !!onBookmark;
 
   return (
     <div className={`flex flex-col ${mine ? 'items-start' : 'items-end'}`}>
@@ -536,6 +658,20 @@ function Bubble({ turn }: { turn: Turn }) {
         {!mine ? (
           <div className="mb-2 flex items-center gap-2 text-xs text-[var(--accent)]">
             <span className="diamond" /> مَجال
+            {canBookmark ? (
+              <button
+                type="button"
+                onClick={() => {
+                  onBookmark!(turn.text, 'assistant');
+                  setSaved(true);
+                  setTimeout(() => setSaved(false), 1800);
+                }}
+                className="mr-auto rounded-full border border-[var(--border)] bg-[var(--bg)]/60 px-2 py-0.5 text-[11px] text-[var(--fg-muted)] transition hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                title="احفظ هذه الإجابة في إشاراتي المرجعية"
+              >
+                {saved ? '✓ محفوظ' : '◷ احفظ'}
+              </button>
+            ) : null}
           </div>
         ) : null}
         {mine ? (
