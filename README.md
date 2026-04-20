@@ -38,6 +38,123 @@ Browser  ──▶  Next.js App Router (server)  ──▶  Basecamp 4 API
 
 ---
 
+## Platform security
+
+The whole stack is built around defense in depth. Every control below is
+enforced in code, not only by configuration.
+
+### Authentication & sessions
+
+- **OAuth 2.0 `web_server` flow** against `launchpad.37signals.com`. The
+  callback validates the state parameter with a constant-time compare
+  (`crypto.timingSafeEqual`). Cookie is bound to host via the `__Host-`
+  prefix in production.
+- **Fresh session id** (32 random bytes) is issued on every successful login.
+- **Sibling session cleanup** — when a user re-auths, every prior session row
+  for the same `(user_id, account_id)` is deleted. A stolen old cookie can't
+  outlive a re-login.
+- **Signed session cookie** — HMAC-SHA256 over a base64url payload. The
+  payload carries only a random session id and `issuedAt` timestamp. The
+  server additionally enforces max-age at read time.
+- **Future-dated rejection** — cookies with `issuedAt` > now + 60s are
+  rejected, closing a small clock-skew tampering window.
+
+### Cookie flags
+
+- `__Host-` prefix (production), `HttpOnly`, `Secure` (production),
+  `SameSite=Lax`, `Path=/`, no `Domain` attribute, server-side max-age.
+- Clear helpers use the same attributes — without that, some browsers
+  silently refuse to overwrite.
+
+### Token storage
+
+- Basecamp access & refresh tokens are AES-256-GCM encrypted before hitting
+  Supabase. The 32-byte key is never sent to the client.
+- **AAD binding** — each ciphertext's AAD is `bc:access:${sid}` or
+  `bc:refresh:${sid}`. A row's ciphertext cannot be copied into another
+  session's row without failing authentication.
+- **Decrypt failure = no session** — the server logs and returns null instead
+  of crashing, so a corrupted or tampered row never leaks.
+
+### CSRF
+
+- All mutating routes (`POST /api/agent`, `DELETE /api/agent`,
+  `POST /api/auth/logout`) require a same-origin `Origin` header (or a
+  matching `Referer`). Cross-site POSTs are rejected at the route layer.
+- `SameSite=Lax` cookies are the second layer: the browser already refuses to
+  send the cookie on cross-site POSTs.
+
+### Rate limiting
+
+Postgres-backed fixed-window limiter (atomic `rl_incr` RPC), keyed per bucket:
+
+| Endpoint | Bucket | Limit |
+| --- | --- | --- |
+| `/api/auth/login` | per IP | 10 / minute |
+| `/api/agent` (POST) | per session | 30 / minute |
+
+Exceeding the limit returns `429` with `Retry-After: 60` and a hashed IP is
+written to the audit log. Fails open only on DB-infra errors, never on logic
+errors, with a server-side warning so it's visible in logs.
+
+### Headers (applied globally)
+
+- **Content-Security-Policy**: `default-src 'self'`; no inline scripts in
+  production; `connect-src 'self'` (all external calls go through our
+  server); `frame-ancestors 'none'`; `object-src 'none'`;
+  `upgrade-insecure-requests`.
+- **Strict-Transport-Security**: `max-age=63072000; includeSubDomains;
+  preload` (production only).
+- **Cross-Origin-Opener-Policy**: `same-origin` and
+  **Cross-Origin-Resource-Policy**: `same-origin` — blocks Spectre-class
+  cross-origin attacks.
+- `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
+  `Referrer-Policy: strict-origin-when-cross-origin`,
+  `Permissions-Policy`, `X-DNS-Prefetch-Control: off`, `X-Powered-By` removed.
+- **API cache-busting**: `Cache-Control: no-store` on every `/api/*` response.
+
+### Transport to Basecamp
+
+- Fetch has a **25s abort timeout** per attempt, `redirect: 'error'` (no
+  follow), and retries 429/5xx with exponential backoff (up to 3 attempts).
+- Body content of Basecamp errors is never forwarded to the client or to the
+  model — only a typed Arabic message + HTTP status.
+
+### Env validation at boot
+
+The server refuses to start if any of these fail:
+
+- `SESSION_SECRET` and `TOKEN_ENCRYPTION_KEY` must each be ≥ 32 bytes and
+  **different values**.
+- `SUPABASE_URL` must be https.
+- `APP_BASE_URL` must be https in production (localhost allowed in dev).
+- `BASECAMP_REDIRECT_URI` must share origin with `APP_BASE_URL` and use path
+  `/api/auth/callback`. This blocks misconfiguration where the OAuth code is
+  sent somewhere else.
+- `BASECAMP_USER_AGENT` must carry a contact address.
+- `SUPABASE_SERVICE_ROLE_KEY` and `ANTHROPIC_API_KEY` are shape-checked.
+
+### Audit log
+
+Every auth event, rate-limit block, and non-readonly agent action is written
+to an append-only `audit_log` table with:
+
+- Hashed IP (HMAC-SHA256 with session-secret pepper, truncated) — never
+  plaintext.
+- Session id, event kind, ok flag, minimal metadata.
+
+No secrets, no plaintext tokens, no user content land in this table.
+
+### Supabase
+
+- **Row-Level Security enabled + default deny** on every table. Only the
+  server (service-role key) can read or write.
+- Service-role key is server-only — never exposed as `NEXT_PUBLIC_*`.
+- A `pg_cron` cleanup snippet is in `schema.sql` for dropping expired
+  sessions, old rate-limit rows, and aged audit entries.
+
+### Agent safety (recap)
+
 ## Safety model — how destructive actions are prevented
 
 Layered defense, all of it server-enforced:

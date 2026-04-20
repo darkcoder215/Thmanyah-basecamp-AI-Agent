@@ -211,19 +211,26 @@ export class BasecampClient {
     if (body !== undefined) headers['Content-Type'] = 'application/json; charset=utf-8';
 
     const MAX_ATTEMPTS = 3;
+    const TIMEOUT_MS = 25_000;
     let lastError: unknown;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       let res: Response;
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort('basecamp_timeout'), TIMEOUT_MS);
       try {
         res = await fetch(url, {
           method,
           headers,
           body: body === undefined ? undefined : JSON.stringify(body),
           cache: 'no-store',
+          signal: ac.signal,
+          redirect: 'error',
         });
       } catch (err) {
+        // Don't echo raw fetch error text back to the model — it can contain
+        // internal IPs, proxy hints, etc. Use a generic message.
         lastError = new BasecampError(
-          err instanceof Error ? err.message : 'network error',
+          ac.signal.aborted ? 'network timeout' : 'network error',
           0,
           'network',
         );
@@ -232,6 +239,8 @@ export class BasecampClient {
           continue;
         }
         throw lastError;
+      } finally {
+        clearTimeout(timer);
       }
 
       if (res.ok) {

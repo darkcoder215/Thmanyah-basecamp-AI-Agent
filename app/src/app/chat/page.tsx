@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { readSessionId } from '@/lib/session';
 import { loadAgentHistory, loadSession } from '@/lib/vault';
 import { ChatWorkspace } from './ChatWorkspace';
+import { LogoutButton } from './LogoutButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,14 +38,7 @@ export default async function ChatPage() {
               <div className="text-[var(--fg)]">{session.userName}</div>
               <div className="text-[var(--fg-subtle)]">{session.accountName}</div>
             </div>
-            <form action="/api/auth/logout" method="post">
-              <button
-                type="submit"
-                className="rounded-full border border-[var(--border-strong)] px-4 py-2 text-[var(--fg-muted)] transition hover:border-[var(--danger)] hover:text-[var(--danger)]"
-              >
-                قطع الربط
-              </button>
-            </form>
+            <LogoutButton />
           </div>
         </div>
       </header>

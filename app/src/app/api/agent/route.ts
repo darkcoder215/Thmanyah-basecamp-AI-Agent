@@ -1,22 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
-import { BasecampClient, BasecampError } from '@/lib/basecamp';
+import { BasecampClient } from '@/lib/basecamp';
 import { env } from '@/lib/env';
 import { readSessionId } from '@/lib/session';
 import { appendAgentMessage, loadAgentHistory } from '@/lib/vault';
 import { AGENT_TOOLS, dispatchTool, findSpec } from '@/lib/agentTools';
 import { clearAgentHistory, loadWindowedHistory } from '@/lib/memory';
+import { assertSameOrigin } from '@/lib/csrf';
+import { rateLimit } from '@/lib/rateLimit';
+import { auditLog } from '@/lib/audit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-// Vercel: the whole agent loop (many tool calls → many LLM turns) can take a
-// while. 60s is the Pro/Enterprise ceiling; Hobby caps at 10s and this route
-// will need upgrading there. Keep streaming so we never hit request timeouts.
 export const maxDuration = 60;
 
 const MODEL = 'claude-opus-4-7';
 const MAX_TURNS = 8;
 const MAX_TOOL_OUTPUT_CHARS = 8000;
+const MAX_MESSAGE_CHARS = 8000;
 const HISTORY_TOKEN_BUDGET = 40_000;
 
 const SYSTEM_PROMPT = `أنت "مجال"، وكيل ثمانية الذكي لإدارة Basecamp باللغة العربية.
@@ -37,7 +38,7 @@ const SYSTEM_PROMPT = `أنت "مجال"، وكيل ثمانية الذكي لإ
 - إذا فشلت أداة، اعرض السبب بالعربية (مثل: انتهاء صلاحية الربط، عدم وجود صلاحيات، عنصر غير موجود) واقترح الخطوة التالية بدلاً من المحاولة مجدداً بلا تعديل.
 
 # اقتراحات ذكية
-- بعد كل خطوة، اقترح على المستخدم خطوة منطقية تالية (مثال: بعد list_projects → "هل تريد فتح أحدها؟"؛ بعد my_overdue → "هل أُعيد جدولة إحدى المتأخرات؟").`;
+- بعد كل خطوة، اقترح على المستخدم خطوة منطقية تالية.`;
 
 type ContentBlock =
   | { type: 'text'; text: string }
@@ -51,7 +52,6 @@ type PublicToolEvent = {
   effect?: string;
   warning?: string;
   error?: string;
-  detail?: string;
 };
 
 function truncate(value: unknown, max = MAX_TOOL_OUTPUT_CHARS): string {
@@ -64,25 +64,26 @@ function stringifyResultForModel(result: any, specName: string): { text: string;
     return { text: truncate(result.output ?? 'ok'), isError: false };
   }
   if (result.kind === 'preview') {
-    const payload = {
-      status: 'preview_required',
-      risk: result.risk,
-      effect: result.effect,
-      warning: result.warning,
-      instruction:
-        'اعرض هذه المعاينة للمستخدم بالعربية ثم انتظر موافقته الصريحة. لا تنفّذ دون إعادة الاستدعاء بـ confirmed=true.',
-      how_to_execute: `أعد استدعاء ${specName} بنفس المدخلات مع إضافة confirmed=true.`,
+    return {
+      text: JSON.stringify(
+        {
+          status: 'preview_required',
+          risk: result.risk,
+          effect: result.effect,
+          warning: result.warning,
+          instruction:
+            'اعرض هذه المعاينة للمستخدم بالعربية ثم انتظر موافقته الصريحة. لا تنفّذ دون إعادة الاستدعاء بـ confirmed=true.',
+          how_to_execute: `أعد استدعاء ${specName} بنفس المدخلات مع إضافة confirmed=true.`,
+        },
+        null,
+        2,
+      ),
+      isError: false,
     };
-    return { text: JSON.stringify(payload, null, 2), isError: false };
   }
   return {
     text: JSON.stringify(
-      {
-        status: 'error',
-        message: result.message,
-        detail: result.detail,
-        http_status: result.httpStatus,
-      },
+      { status: 'error', message: result.message, http_status: result.httpStatus },
       null,
       2,
     ),
@@ -90,31 +91,55 @@ function stringifyResultForModel(result: any, specName: string): { text: string;
   };
 }
 
+/** Public errors use stable codes; detail is a short, user-safe Arabic string. */
+function errorResponse(code: string, status: number, detail?: string) {
+  return NextResponse.json({ error: code, detail: detail ?? null }, { status });
+}
+
 export async function POST(req: NextRequest) {
+  // 1) CSRF
+  const originFail = assertSameOrigin(req);
+  if (originFail) {
+    await auditLog({ kind: 'agent.rejected', ok: false, meta: { reason: originFail } });
+    return errorResponse('forbidden', 403, 'الطلب ليس من نفس المصدر.');
+  }
+
+  // 2) Auth
   const sid = readSessionId();
-  if (!sid) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  if (!sid) return errorResponse('unauthorized', 401);
 
+  // 3) Rate limit (per session)
+  const rl = await rateLimit({ bucket: `agent:${sid}`, limit: 30, windowSeconds: 60 });
+  if (!rl.allowed) {
+    await auditLog({ sid, kind: 'agent.rate_limited', ok: false });
+    return NextResponse.json(
+      { error: 'rate_limited', detail: 'طلبات كثيرة. انتظر دقيقة ثم حاول مجدداً.' },
+      { status: 429, headers: { 'Retry-After': '60' } },
+    );
+  }
+
+  // 4) Load Basecamp session
   const basecamp = await BasecampClient.forSession(sid);
-  if (!basecamp) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  if (!basecamp) return errorResponse('unauthorized', 401);
 
-  let body: { message?: string };
+  // 5) Input validation
+  let body: { message?: unknown };
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: 'invalid_json' }, { status: 400 });
+    return errorResponse('invalid_json', 400);
   }
-  const userText = body.message?.trim();
-  if (!userText) return NextResponse.json({ error: 'empty_message' }, { status: 400 });
-  if (userText.length > 8000) {
-    return NextResponse.json(
-      { error: 'message_too_long', detail: 'الرسالة طويلة جداً. حدّها 8000 حرف.' },
-      { status: 413 },
-    );
+  if (typeof body?.message !== 'string') {
+    return errorResponse('empty_message', 400);
+  }
+  const userText = body.message.trim();
+  if (!userText) return errorResponse('empty_message', 400);
+  if (userText.length > MAX_MESSAGE_CHARS) {
+    return errorResponse('message_too_long', 413, `حدّ الرسالة ${MAX_MESSAGE_CHARS} حرف.`);
   }
 
   const client = new Anthropic({ apiKey: env.anthropic.apiKey });
 
-  // Load trimmed, token-aware history.
   const messages = await loadWindowedHistory(sid, HISTORY_TOKEN_BUDGET);
 
   const userBlocks: ContentBlock[] = [{ type: 'text', text: userText }];
@@ -135,7 +160,6 @@ export async function POST(req: NextRequest) {
           {
             type: 'text',
             text: SYSTEM_PROMPT,
-            // System prompt + tool list rarely change → cache them across turns.
             cache_control: { type: 'ephemeral' },
           },
         ] as any,
@@ -145,6 +169,9 @@ export async function POST(req: NextRequest) {
       });
       response = await stream.finalMessage();
     } catch (err) {
+      // Sanitize Anthropic errors before returning. Never leak raw SDK error
+      // strings — they can include API keys, request IDs, internal URLs.
+      console.error('[agent] anthropic error:', err);
       if (err instanceof Anthropic.RateLimitError) {
         return NextResponse.json(
           { error: 'rate_limited', detail: 'تم تجاوز حدّ Anthropic. انتظر ثوانٍ ثم حاول مجدداً.' },
@@ -152,21 +179,13 @@ export async function POST(req: NextRequest) {
         );
       }
       if (err instanceof Anthropic.AuthenticationError) {
-        return NextResponse.json(
-          { error: 'anthropic_auth', detail: 'مفتاح Anthropic غير صالح. راجع إعدادات الخادم.' },
-          { status: 500 },
-        );
+        await auditLog({ sid, kind: 'agent.anthropic_auth_fail', ok: false });
+        return errorResponse('service_unavailable', 503, 'تعطّل مؤقت في خدمة الوكيل.');
       }
       if (err instanceof Anthropic.APIError) {
-        return NextResponse.json(
-          { error: 'anthropic_error', detail: err.message, status: err.status },
-          { status: 502 },
-        );
+        return errorResponse('service_unavailable', 503, 'تعطّل مؤقت في خدمة الوكيل.');
       }
-      return NextResponse.json(
-        { error: 'unknown', detail: err instanceof Error ? err.message : 'خطأ غير معروف' },
-        { status: 500 },
-      );
+      return errorResponse('unknown', 500, 'خطأ غير متوقع.');
     }
 
     messages.push({ role: 'assistant', content: response.content });
@@ -197,11 +216,19 @@ export async function POST(req: NextRequest) {
         effect: result.kind === 'preview' ? result.effect : undefined,
         warning: result.kind === 'preview' ? result.warning : undefined,
         error: result.kind === 'error' ? result.message : undefined,
-        detail: result.kind === 'error' ? result.detail : undefined,
       });
 
-      // Auth failure inside a tool → the session is dead. Stop early so the
-      // client can redirect to /connect instead of burning more LLM calls.
+      // Audit every non-readonly invocation with its outcome (pre-confirm
+      // previews as well, so we can later review what the agent proposed).
+      if (risk !== 'readonly') {
+        await auditLog({
+          sid,
+          kind: `agent.action.${result.kind}`,
+          ok: result.kind === 'ok',
+          meta: { name: tu.name, risk },
+        });
+      }
+
       if (result.kind === 'error' && result.httpStatus === 401) {
         stoppedEarly = 'basecamp_unauthorized';
       }
@@ -219,23 +246,17 @@ export async function POST(req: NextRequest) {
     await appendAgentMessage(sid, 'tool', toolResultBlocks);
 
     if (stoppedEarly) break;
-
-    if (turn === MAX_TURNS - 1) {
-      stoppedEarly = 'max_turns';
-    }
+    if (turn === MAX_TURNS - 1) stoppedEarly = 'max_turns';
   }
 
   if (stoppedEarly === 'basecamp_unauthorized') {
-    return NextResponse.json(
-      {
-        reply:
-          finalText ||
-          'انتهت صلاحية الربط مع بيسكامب أثناء التنفيذ. يرجى إعادة الربط من صفحة الاتصال.',
-        tools: toolEvents,
-        reconnect: true,
-      },
-      { status: 200 },
-    );
+    return NextResponse.json({
+      reply:
+        finalText ||
+        'انتهت صلاحية الربط مع بيسكامب أثناء التنفيذ. يرجى إعادة الربط من صفحة الاتصال.',
+      tools: toolEvents,
+      reconnect: true,
+    });
   }
 
   if (stoppedEarly === 'max_turns') {
@@ -253,7 +274,7 @@ export async function POST(req: NextRequest) {
 
 export async function GET() {
   const sid = readSessionId();
-  if (!sid) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  if (!sid) return errorResponse('unauthorized', 401);
   const history = await loadAgentHistory(sid);
   const timeline = history
     .filter((h) => h.role !== 'tool')
@@ -269,9 +290,12 @@ export async function GET() {
   return NextResponse.json({ timeline });
 }
 
-export async function DELETE() {
+export async function DELETE(req: NextRequest) {
+  const originFail = assertSameOrigin(req);
+  if (originFail) return errorResponse('forbidden', 403);
   const sid = readSessionId();
-  if (!sid) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  if (!sid) return errorResponse('unauthorized', 401);
   await clearAgentHistory(sid);
+  await auditLog({ sid, kind: 'agent.history_cleared' });
   return NextResponse.json({ ok: true });
 }
