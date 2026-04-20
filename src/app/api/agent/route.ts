@@ -14,7 +14,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
-const MODEL = 'claude-opus-4-7';
+const MODEL = 'claude-sonnet-4-6';
 // Raised from 8 → 20 so bulk multi-step flows (e.g. creating several todos across
 // different assignees through the preview/confirm cycle, or generating a
 // person_activity_report after find_person + confirmation) don't get truncated
