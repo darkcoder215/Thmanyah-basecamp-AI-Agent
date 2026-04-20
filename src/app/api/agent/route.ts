@@ -3,7 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { BasecampClient } from '@/lib/basecamp';
 import { env } from '@/lib/env';
 import { readSessionId } from '@/lib/session';
-import { appendAgentMessage, loadAgentHistory, listBookmarks } from '@/lib/vault';
+import { appendAgentMessage, loadAgentHistory } from '@/lib/vault';
 import { AGENT_TOOLS, dispatchTool, findSpec } from '@/lib/agentTools';
 import { clearAgentHistory, loadWindowedHistory } from '@/lib/memory';
 import { assertSameOrigin } from '@/lib/csrf';
@@ -57,10 +57,10 @@ const SYSTEM_PROMPT = `أنت "مجال"، وكيل ثمانية الذكي لإ
 - إذا رفض المستخدم أو تردّد: لا تنفّذ، واقترح بديلاً أخف.
 - إذا فشلت أداة، اعرض السبب بالعربية (مثل: انتهاء صلاحية الربط، عدم وجود صلاحيات، عنصر غير موجود) واقترح الخطوة التالية بدلاً من المحاولة مجدداً بلا تعديل.
 
-# الإشارات المحفوظة (Bookmarks / ذاكرة المستخدم)
-- يمكن للمستخدم حفظ أي من إجاباتك كإشارة مرجعية. عند توفّر إشارات محفوظة، ستُحقَن قبل السياق العادي تحت عنوان «إشارات المستخدم المحفوظة».
-- تعامل معها كذاكرة طويلة الأمد: إذا كان سؤال المستخدم يشير إلى شيء «سابق» أو «محفوظ» أو «كما قلنا»، راجع هذه الإشارات أولاً.
-- لا تُظهر هذه الإشارات للمستخدم إلا إذا طلب ذلك صراحة.
+# الإشارات المحفوظة (Bookmarks)
+- يمكن للمستخدم حفظ أي من إجاباتك كإشارة مرجعية، ثم الرجوع إليها بكتابة @ في صندوق الدردشة واختيار الإشارة. عندها تظهر الإشارة ضمن رسالته في كتلة اقتباس باسم «إشارة محفوظة».
+- حين ترى كتلة اقتباس بعنوان «إشارة محفوظة»، تعامل معها كسياق قدّمه المستخدم بوعي — فسِّر طلبه الحالي على ضوئها ولا تخلطها بردّه الجديد.
+- لا تُشر إلى إشارات لم يُرفقها المستخدم؛ ولا تطلب منه تذكيرك بها — بل اقترح عليه استخدام @ إن كان يحتاج استدعاء إشارة قديمة.
 
 # تنسيق الإجابة (Markdown)
 - استخدم Markdown في إجاباتك. لا تعرض JSON خاماً أبداً.
@@ -191,27 +191,6 @@ async function handlePost(req: NextRequest) {
 
   const messages = await loadWindowedHistory(sid, HISTORY_TOKEN_BUDGET);
 
-  // Pinned bookmarks — always injected as part of the system prompt so the
-  // model can reference them in any turn. Capped hard so a runaway number of
-  // bookmarks can't blow the context budget.
-  const MAX_PINNED_BOOKMARKS = 20;
-  const MAX_BOOKMARK_CHARS_IN_PROMPT = 600;
-  let pinnedBookmarksBlock = '';
-  try {
-    const bms = await listBookmarks(sid, MAX_PINNED_BOOKMARKS);
-    if (bms.length) {
-      const lines = bms.map((b, idx) => {
-        const snippet = b.content.slice(0, MAX_BOOKMARK_CHARS_IN_PROMPT);
-        const note = b.note ? ` — ملاحظة: ${b.note}` : '';
-        const trailer = b.content.length > MAX_BOOKMARK_CHARS_IN_PROMPT ? ' […]' : '';
-        return `[${idx + 1}] ${snippet}${trailer}${note}`;
-      });
-      pinnedBookmarksBlock = `\n\n# إشارات المستخدم المحفوظة (${bms.length})\nهذه ذاكرة طويلة الأمد يختارها المستخدم. راجعها عند أي إشارة لـ«قلنا سابقاً» أو «احفظ». لا تعرضها ما لم يُطلب.\n\n${lines.join('\n\n')}`;
-    }
-  } catch {
-    // Bookmarks are optional; never block a turn over them.
-  }
-
   const userBlocks: ContentBlock[] = [{ type: 'text', text: userText }];
   messages.push({ role: 'user', content: userBlocks as any });
   await appendAgentMessage(sid, 'user', userBlocks);
@@ -233,9 +212,6 @@ async function handlePost(req: NextRequest) {
             text: SYSTEM_PROMPT,
             cache_control: { type: 'ephemeral' },
           },
-          ...(pinnedBookmarksBlock
-            ? [{ type: 'text', text: pinnedBookmarksBlock } as any]
-            : []),
         ] as any,
         tools: AGENT_TOOLS,
         messages,

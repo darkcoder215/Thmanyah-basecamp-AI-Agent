@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 type ToolEvent = {
   name: string;
@@ -163,8 +163,13 @@ export function ChatWorkspace({
   const [attachment, setAttachment] = useState<Attachment | null>(null);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const [bookmarkError, setBookmarkError] = useState<string | null>(null);
+  const [mentionOpen, setMentionOpen] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState('');
+  const [mentionStart, setMentionStart] = useState<number | null>(null);
+  const [mentionIndex, setMentionIndex] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -242,10 +247,93 @@ export function ChatWorkspace({
     [refreshBookmarks],
   );
 
-  const insertBookmarkAsContext = useCallback((b: Bookmark) => {
-    const snippet = `> من إشاراتي المحفوظة:\n> ${b.content.replace(/\n/g, '\n> ')}\n\n`;
-    setInput((prev) => snippet + prev);
+  const formatBookmarkQuote = useCallback((b: Bookmark): string => {
+    const lines = b.content.split('\n');
+    const quoted = lines
+      .map((l, i) => (i === 0 ? `> [إشارة محفوظة]: ${l}` : `> ${l}`))
+      .join('\n');
+    return quoted + '\n';
   }, []);
+
+  const insertBookmarkAsContext = useCallback(
+    (b: Bookmark) => {
+      const snippet = formatBookmarkQuote(b) + '\n';
+      setInput((prev) => snippet + prev);
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    },
+    [formatBookmarkQuote],
+  );
+
+  // Filter bookmarks by what the user has typed after `@`. Simple case-insensitive
+  // substring match against content + note. Top 8 shown.
+  const mentionMatches = useMemo(() => {
+    if (!mentionOpen) return [] as Bookmark[];
+    const q = mentionQuery.trim().toLowerCase();
+    const pool = bookmarks;
+    const filtered = q
+      ? pool.filter(
+          (b) =>
+            b.content.toLowerCase().includes(q) ||
+            (b.note ?? '').toLowerCase().includes(q),
+        )
+      : pool;
+    return filtered.slice(0, 8);
+  }, [bookmarks, mentionOpen, mentionQuery]);
+
+  // After typing, figure out whether the caret is currently inside a `@token`
+  // at a mention-eligible position (start of input, or preceded by whitespace).
+  const updateMentionStateFromInput = useCallback((next: string, caret: number) => {
+    for (let i = caret - 1; i >= 0; i--) {
+      const c = next[i];
+      if (c === '@') {
+        const prev = i === 0 ? '' : next[i - 1];
+        if (!prev || /\s/.test(prev)) {
+          const query = next.slice(i + 1, caret);
+          if (!/\s/.test(query)) {
+            setMentionOpen(true);
+            setMentionStart(i);
+            setMentionQuery(query);
+            setMentionIndex(0);
+            return;
+          }
+        }
+        break;
+      }
+      if (/\s/.test(c)) break;
+    }
+    setMentionOpen(false);
+    setMentionStart(null);
+    setMentionQuery('');
+  }, []);
+
+  const closeMention = useCallback(() => {
+    setMentionOpen(false);
+    setMentionStart(null);
+    setMentionQuery('');
+  }, []);
+
+  const selectMention = useCallback(
+    (b: Bookmark) => {
+      const ta = textareaRef.current;
+      if (mentionStart == null || !ta) {
+        closeMention();
+        return;
+      }
+      const caret = ta.selectionStart ?? input.length;
+      const before = input.slice(0, mentionStart);
+      const after = input.slice(caret);
+      const snippet = formatBookmarkQuote(b);
+      const next = before + snippet + after;
+      setInput(next);
+      closeMention();
+      const pos = (before + snippet).length;
+      requestAnimationFrame(() => {
+        ta.focus();
+        ta.setSelectionRange(pos, pos);
+      });
+    },
+    [mentionStart, input, formatBookmarkQuote, closeMention],
+  );
 
   const send = useCallback(
     async (message: string, opts?: { attachment?: Attachment | null }) => {
@@ -474,7 +562,17 @@ export function ChatWorkspace({
               </button>
             </div>
           ) : null}
-          <div className="flex items-end gap-3 rounded-2xl border border-[var(--border-strong)] bg-[var(--bg)] p-3 focus-within:border-[var(--accent)]">
+          <div className="relative flex items-end gap-3 rounded-2xl border border-[var(--border-strong)] bg-[var(--bg)] p-3 focus-within:border-[var(--accent)]">
+            {mentionOpen ? (
+              <MentionPopover
+                matches={mentionMatches}
+                highlight={mentionIndex}
+                query={mentionQuery}
+                onPick={(b) => selectMention(b)}
+                onHover={(i) => setMentionIndex(i)}
+                onClose={closeMention}
+              />
+            ) : null}
             <input
               ref={fileInputRef}
               type="file"
@@ -505,9 +603,50 @@ export function ChatWorkspace({
               </svg>
             </button>
             <textarea
+              ref={textareaRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                const v = e.target.value;
+                setInput(v);
+                updateMentionStateFromInput(v, e.target.selectionStart ?? v.length);
+              }}
+              onKeyUp={(e) => {
+                const ta = e.currentTarget;
+                updateMentionStateFromInput(ta.value, ta.selectionStart ?? ta.value.length);
+              }}
+              onClick={(e) => {
+                const ta = e.currentTarget;
+                updateMentionStateFromInput(ta.value, ta.selectionStart ?? ta.value.length);
+              }}
+              onBlur={() => {
+                // Delay so a click on the popover still fires before we close it.
+                setTimeout(() => closeMention(), 120);
+              }}
               onKeyDown={(e) => {
+                if (mentionOpen && mentionMatches.length > 0) {
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setMentionIndex((i) => (i + 1) % mentionMatches.length);
+                    return;
+                  }
+                  if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setMentionIndex(
+                      (i) => (i - 1 + mentionMatches.length) % mentionMatches.length,
+                    );
+                    return;
+                  }
+                  if (e.key === 'Enter' || e.key === 'Tab') {
+                    e.preventDefault();
+                    selectMention(mentionMatches[mentionIndex]);
+                    return;
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    closeMention();
+                    return;
+                  }
+                }
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
                   send(input, { attachment });
@@ -516,7 +655,7 @@ export function ChatWorkspace({
               placeholder={
                 attachment
                   ? 'صِف ما تريد عمله بالبيانات المرفقة (مثال: «أنشئ مهاماً من الأعمدة وأسندها بحسب عمود المسؤول»)…'
-                  : 'اكتب طلبك لمَجال…'
+                  : 'اكتب طلبك لمَجال… (استخدم @ لإدراج إشارة محفوظة)'
               }
               dir="rtl"
               rows={2}
@@ -565,7 +704,7 @@ export function ChatWorkspace({
           ) : null}
           {bookmarks.length === 0 ? (
             <p className="text-xs leading-loose text-[var(--fg-subtle)]">
-              احفظ أي إجابة مهمة من مَجال بالضغط على «احفظ» فوق الرد، لتظهر هنا ويمكن إدراجها كسياق في أي محادثة لاحقة.
+              احفظ أي إجابة مهمة من مَجال بالضغط على «احفظ» فوق الرد. لاستدعاء إشارة محفوظة داخل رسالتك اكتب @ في صندوق الدردشة، أو اضغط «إدراج» هنا.
             </p>
           ) : (
             <ul className="space-y-2 text-sm">
@@ -1098,6 +1237,83 @@ function Inline({ text }: { text: string }) {
   }
   if (last < text.length) tokens.push(text.slice(last));
   return <>{tokens}</>;
+}
+
+function MentionPopover({
+  matches,
+  highlight,
+  query,
+  onPick,
+  onHover,
+  onClose,
+}: {
+  matches: Bookmark[];
+  highlight: number;
+  query: string;
+  onPick: (b: Bookmark) => void;
+  onHover: (i: number) => void;
+  onClose: () => void;
+}) {
+  // Empty state — still render the popover so the user gets a hint that
+  // their query matches nothing, but with no clickable rows.
+  if (matches.length === 0) {
+    return (
+      <div
+        className="absolute bottom-full right-0 z-20 mb-2 w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-xs text-[var(--fg-subtle)] shadow-lg"
+        role="listbox"
+      >
+        {query
+          ? `لا توجد إشارة محفوظة تطابق «${query}». احفظ رداً من مَجال ثم ارجع إليه هنا.`
+          : 'لا توجد إشارات محفوظة بعد. اضغط «احفظ» فوق أي رد لإضافته.'}
+      </div>
+    );
+  }
+  return (
+    <div
+      className="absolute bottom-full right-0 z-20 mb-2 max-h-72 w-full max-w-md overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1 shadow-lg"
+      role="listbox"
+      onMouseDown={(e) => {
+        // Prevent the textarea blur from firing before the click registers.
+        e.preventDefault();
+      }}
+    >
+      <div className="px-3 py-2 text-[10px] uppercase tracking-[0.2em] text-[var(--fg-subtle)]">
+        إشاراتك المحفوظة
+        <button
+          onClick={onClose}
+          className="float-left text-[var(--fg-subtle)] transition hover:text-[var(--fg)]"
+          aria-label="إغلاق"
+        >
+          ×
+        </button>
+      </div>
+      <ul className="space-y-1">
+        {matches.map((b, i) => (
+          <li key={b.id}>
+            <button
+              type="button"
+              role="option"
+              aria-selected={i === highlight}
+              onMouseEnter={() => onHover(i)}
+              onClick={() => onPick(b)}
+              className={`w-full rounded-md px-3 py-2 text-right text-xs leading-relaxed transition ${
+                i === highlight
+                  ? 'bg-[var(--accent)]/15 text-[var(--fg)]'
+                  : 'text-[var(--fg-muted)] hover:bg-[var(--bg)]/60 hover:text-[var(--fg)]'
+              }`}
+            >
+              <span className="line-clamp-3">{b.content}</span>
+              {b.note ? (
+                <span className="mt-1 block text-[10px] text-[var(--fg-subtle)]">
+                  {b.note}
+                </span>
+              ) : null}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 function Thinking() {
