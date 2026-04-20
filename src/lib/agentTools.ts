@@ -475,11 +475,74 @@ const SPECS: ToolSpec[] = [
   {
     name: 'my_overdue',
     risk: 'readonly',
-    description: 'جلب المهام المتأخرة للمستخدم الحالي.',
+    description:
+      'جلب كل المهام المتأخرة عبر المشاريع، مُجمَّعة حسب درجة التأخير (under_a_week_late / over_a_week_late / over_a_month_late / over_three_months_late).',
     effect: () => 'سأجلب المهام المتأخرة.',
     schema: { type: 'object', properties: {} },
     validator: z.object({}).passthrough(),
     run: (_i, c) => c.myOverdue(),
+  },
+  {
+    name: 'my_assignments_due',
+    risk: 'readonly',
+    description:
+      'جلب المهام المسندة إليّ المفلترة حسب نطاق تاريخ الاستحقاق (overdue افتراضياً).',
+    effect: (i) => `سأجلب مهامي بنطاق ${i?.scope ?? 'overdue'}.`,
+    schema: {
+      type: 'object',
+      properties: {
+        scope: {
+          type: 'string',
+          enum: ['overdue', 'due_today', 'due_tomorrow', 'due_later_this_week', 'due_next_week', 'due_later'],
+        },
+      },
+    },
+    validator: z.object({
+      scope: z
+        .enum(['overdue', 'due_today', 'due_tomorrow', 'due_later_this_week', 'due_next_week', 'due_later'])
+        .optional(),
+    }),
+    run: (i, c) => c.myAssignmentsDue(i.scope ?? 'overdue'),
+  },
+  {
+    name: 'my_assignments_completed',
+    risk: 'readonly',
+    description: 'جلب المهام المُنجَزة المسندة إليّ.',
+    effect: () => 'سأجلب المهام المُنجَزة المسندة إليّ.',
+    schema: { type: 'object', properties: {} },
+    validator: z.object({}).passthrough(),
+    run: (_i, c) => c.myAssignmentsCompleted(),
+  },
+  {
+    name: 'report_todos_assignable',
+    risk: 'readonly',
+    description:
+      'اعرض قائمة الأشخاص الذين يمكن إسناد مهام لهم — مفيدة كخطوة تمهيدية قبل report_todos_assigned_to_person.',
+    effect: () => 'سأعرض الأشخاص الذين يمكن إسناد مهام لهم.',
+    schema: { type: 'object', properties: {} },
+    validator: z.object({}).passthrough(),
+    run: (_i, c) => c.reportTodosAssignable(),
+  },
+  {
+    name: 'report_todos_assigned_to_person',
+    risk: 'readonly',
+    description:
+      'اعرض جميع المهام النشطة المسندة لشخص معين عبر المشاريع، مُجمَّعة حسب المشروع (bucket) أو حسب تاريخ الاستحقاق (date).',
+    effect: (i) =>
+      `سأعرض مهام الشخص ${i.person_id} مُجمَّعة حسب ${i.group_by ?? 'bucket'}.`,
+    schema: {
+      type: 'object',
+      properties: {
+        person_id: { type: 'integer' },
+        group_by: { type: 'string', enum: ['bucket', 'date'] },
+      },
+      required: ['person_id'],
+    },
+    validator: z.object({
+      person_id: idSchema,
+      group_by: z.enum(['bucket', 'date']).optional(),
+    }),
+    run: (i, c) => c.reportTodosAssignedToPerson(i.person_id, i.group_by ?? 'bucket'),
   },
 ];
 

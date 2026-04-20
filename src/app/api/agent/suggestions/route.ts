@@ -27,14 +27,18 @@ export async function GET() {
     ]);
 
     if (overdue.status === 'fulfilled') {
-      const groups = Array.isArray(overdue.value) ? overdue.value : [];
-      const count = groups.reduce((n, g: any) => n + (g?.todos?.length ?? 0), 0);
+      const o = (overdue.value ?? {}) as Record<string, any[]>;
+      const count =
+        (o.under_a_week_late?.length ?? 0) +
+        (o.over_a_week_late?.length ?? 0) +
+        (o.over_a_month_late?.length ?? 0) +
+        (o.over_three_months_late?.length ?? 0);
       if (count > 0) suggestions.push(`استعرِض ${count} مهمة متأخرة عليّ وأعطني أولوياتها`);
     }
 
     if (assignments.status === 'fulfilled') {
-      const groups = Array.isArray(assignments.value) ? assignments.value : [];
-      const count = groups.reduce((n, g: any) => n + (g?.todos?.length ?? 0), 0);
+      const a = (assignments.value ?? {}) as { priorities?: any[]; non_priorities?: any[] };
+      const count = (a.priorities?.length ?? 0) + (a.non_priorities?.length ?? 0);
       if (count > 0) suggestions.push(`لخّص مهامي المسندة (${count}) وقسّمها حسب المشروع`);
     }
 

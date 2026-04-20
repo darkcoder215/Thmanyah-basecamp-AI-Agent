@@ -270,11 +270,12 @@ export class BasecampClient {
 
   // Projects
   //
-  // Basecamp 3 does not accept `?status=` on /projects.json — archived and
-  // trashed live at distinct paths. Using `?status=active` returns 400.
+  // Per the official Basecamp 3 API docs, `GET /projects.json` returns active
+  // projects by default; the `status` query param is only valid for values
+  // `archived` or `trashed`. Sending `?status=active` returns 400.
   listProjects(status: 'active' | 'archived' | 'trashed' = 'active') {
-    const path = status === 'active' ? '/projects.json' : `/projects/${status}.json`;
-    return this.request<any[]>('GET', path);
+    const q = status === 'active' ? '' : `?status=${status}`;
+    return this.request<any[]>('GET', `/projects.json${q}`);
   }
   getProject(projectId: number) {
     return this.request<any>('GET', `/projects/${projectId}.json`);
@@ -381,58 +382,71 @@ export class BasecampClient {
 
   // My stuff
   //
-  // Basecamp 3 exposes no /my/schedule, /my/assignments, or /my/overdue
-  // endpoints — those were hallucinated and return 404. Instead we query
-  // the cross-project Recordings endpoint and filter client-side.
-  //
-  // https://github.com/basecamp/bc3-api/blob/master/sections/recordings.md
+  // Per the official BC3 docs:
+  //   GET /my/assignments.json                       → {priorities, non_priorities}
+  //   GET /my/assignments/due.json?scope=…           → todos filtered by due-date scope
+  //   GET /my/assignments/completed.json             → completed todos
+  //   GET /reports/todos/overdue.json                → {under_a_week_late, over_a_week_late, over_a_month_late, over_three_months_late}
+  //   GET /reports/schedules/upcoming.json?window_starts_on&window_ends_on
+  //   GET /reports/todos/assigned.json               → list of people who can have todos assigned
+  //   GET /reports/todos/assigned/{id}.json          → todos assigned to a specific person
 
-  /** All active Schedule entries across projects, most-recent first. */
-  async mySchedule(): Promise<any[]> {
-    return this.fetchAllRecordings('Schedule::Entry', 'active');
+  /** Schedule entries + assignables within a rolling 7-day window (today → +7d). */
+  mySchedule(windowDays: number = 7) {
+    const start = new Date();
+    const end = new Date(start.getTime() + windowDays * 24 * 60 * 60 * 1000);
+    const q = new URLSearchParams({
+      window_starts_on: start.toISOString().slice(0, 10),
+      window_ends_on: end.toISOString().slice(0, 10),
+    });
+    return this.request<{
+      schedule_entries: any[];
+      recurring_schedule_entry_occurrences: any[];
+      assignables: any[];
+    }>('GET', `/reports/schedules/upcoming.json?${q.toString()}`);
   }
 
-  /** Todos assigned to the current user across all projects. */
-  async myAssignments(): Promise<any[]> {
-    const todos = await this.fetchAllRecordings('Todo', 'active');
-    const meId = this.session.userId;
-    return todos.filter((t: any) =>
-      !t.completed &&
-      Array.isArray(t.assignees) &&
-      t.assignees.some((a: any) => a?.id === meId),
+  /** Todos assigned to the current user, grouped into priorities / non_priorities. */
+  myAssignments() {
+    return this.request<{ priorities: any[]; non_priorities: any[] }>(
+      'GET',
+      `/my/assignments.json`,
     );
   }
 
-  /** Todos assigned to the current user whose due date is past. */
-  async myOverdue(): Promise<any[]> {
-    const mine = await this.myAssignments();
-    const today = new Date().toISOString().slice(0, 10);
-    return mine.filter((t: any) => typeof t.due_on === 'string' && t.due_on < today);
+  /** Todos assigned to the current user filtered by due-date scope. */
+  myAssignmentsDue(
+    scope: 'overdue' | 'due_today' | 'due_tomorrow' | 'due_later_this_week' | 'due_next_week' | 'due_later' = 'overdue',
+  ) {
+    return this.request<any[]>('GET', `/my/assignments/due.json?scope=${scope}`);
   }
 
-  /** Paginated recordings fetch — follows Link: rel="next" up to a cap. */
-  private async fetchAllRecordings(
-    type: 'Todo' | 'Schedule::Entry' | 'Message' | 'Document' | 'Kanban::Card',
-    status: 'active' | 'archived' | 'trashed',
-  ): Promise<any[]> {
-    const MAX_PAGES = 5;
-    const results: any[] = [];
-    let page = 1;
-    while (page <= MAX_PAGES) {
-      const q = new URLSearchParams({
-        type,
-        status,
-        sort: 'updated_at',
-        direction: 'desc',
-        page: String(page),
-      });
-      const batch = await this.request<any[]>('GET', `/projects/recordings.json?${q.toString()}`);
-      if (!Array.isArray(batch) || batch.length === 0) break;
-      results.push(...batch);
-      if (batch.length < 50) break;
-      page++;
-    }
-    return results;
+  /** Completed todos assigned to the current user. */
+  myAssignmentsCompleted() {
+    return this.request<any[]>('GET', `/my/assignments/completed.json`);
+  }
+
+  /** All overdue todos across projects, grouped by how late they are. */
+  myOverdue() {
+    return this.request<{
+      under_a_week_late: any[];
+      over_a_week_late: any[];
+      over_a_month_late: any[];
+      over_three_months_late: any[];
+    }>('GET', `/reports/todos/overdue.json`);
+  }
+
+  /** List of people who can have to-dos assigned to them. */
+  reportTodosAssignable() {
+    return this.request<any[]>('GET', `/reports/todos/assigned.json`);
+  }
+
+  /** All active, pending to-dos assigned to a specific person. */
+  reportTodosAssignedToPerson(personId: number, groupBy: 'bucket' | 'date' = 'bucket') {
+    return this.request<{ person: any; grouped_by: string; todos: any[] }>(
+      'GET',
+      `/reports/todos/assigned/${personId}.json?group_by=${groupBy}`,
+    );
   }
 }
 
