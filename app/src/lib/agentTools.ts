@@ -1,111 +1,212 @@
 import 'server-only';
+import { z } from 'zod';
 import type Anthropic from '@anthropic-ai/sdk';
-import { BasecampClient } from './basecamp';
+import { BasecampClient, BasecampError } from './basecamp';
 
-export const AGENT_TOOLS: Anthropic.Tool[] = [
+// ────────────────────────── Risk model ──────────────────────────
+//
+// readonly    — listing, fetching. Always safe to run.
+// write       — creates, posts, updates. Requires `confirmed: true`. Otherwise
+//               the dispatcher returns a structured preview describing the
+//               exact effect, without touching Basecamp.
+// destructive — deletes, trashes, revokes. Same flow as `write`, but the
+//               preview is flagged as irreversible so the agent *must* warn the
+//               user. Server STILL refuses to execute without `confirmed: true`,
+//               no matter what the prompt/model says — this is defense in depth.
+
+type Risk = 'readonly' | 'write' | 'destructive';
+
+export type ToolSpec = {
+  name: string;
+  risk: Risk;
+  /** What the tool does, in Arabic — shown in the Claude tool description. */
+  description: string;
+  /** A plain-language Arabic effect statement, used for previews. */
+  effect: (input: any) => string;
+  /** JSON schema for Claude. `confirmed` added automatically for write/destructive. */
+  schema: Record<string, any>;
+  /** Zod validator for runtime tool input. */
+  validator: z.ZodTypeAny;
+  /** The actual call. */
+  run: (input: any, client: BasecampClient) => Promise<unknown>;
+};
+
+const idSchema = z.number().int().positive();
+const htmlContent = z.string().min(1).max(50_000);
+
+const SPECS: ToolSpec[] = [
+  // ───────── Projects ─────────
   {
     name: 'list_projects',
-    description: 'اعرض مشاريع بيسكامب النشطة (أو المؤرشفة / المحذوفة) على الحساب المتصل.',
-    input_schema: {
+    risk: 'readonly',
+    description:
+      'اعرض مشاريع بيسكامب (نشطة/مؤرشفة/محذوفة) على الحساب المتصل. مثال: "اعرض مشاريعي النشطة".',
+    effect: (i) => `سأعرض المشاريع بحالة ${i?.status ?? 'active'}.`,
+    schema: {
       type: 'object',
       properties: {
-        status: {
-          type: 'string',
-          enum: ['active', 'archived', 'trashed'],
-          description: 'حالة المشاريع المطلوبة. الافتراضي active.',
-        },
+        status: { type: 'string', enum: ['active', 'archived', 'trashed'] },
       },
     },
+    validator: z.object({ status: z.enum(['active', 'archived', 'trashed']).optional() }),
+    run: (i, c) => c.listProjects(i.status ?? 'active'),
   },
   {
     name: 'get_project',
-    description: 'اجلب مشروعاً واحداً مع لوحة الأدوات (dock) لمعرفة أرقام التو‌دوسِت ولوح الرسائل والكامبفاير.',
-    input_schema: {
+    risk: 'readonly',
+    description:
+      'اجلب مشروعاً واحداً مع لوحة الأدوات (dock) التي تحتوي على معرفات todoset / message_board / campfire. استخدمها قبل أي عملية داخل مشروع.',
+    effect: (i) => `سأجلب تفاصيل المشروع رقم ${i.project_id}.`,
+    schema: {
       type: 'object',
       properties: { project_id: { type: 'integer' } },
       required: ['project_id'],
     },
+    validator: z.object({ project_id: idSchema }),
+    run: (i, c) => c.getProject(i.project_id),
   },
   {
     name: 'create_project',
-    description: 'أنشئ مشروعاً جديداً. يتطلب تأكيد المستخدم قبل الاستدعاء.',
-    input_schema: {
+    risk: 'write',
+    description:
+      'أنشئ مشروعاً جديداً في الحساب. مثال: "أنشئ مشروعاً باسم موسم 5 لفريق الإنتاج".',
+    effect: (i) =>
+      `سأنشئ مشروعاً جديداً باسم «${i.name}»${i.description ? ` مع وصف: ${i.description}` : ''}.`,
+    schema: {
       type: 'object',
       properties: {
-        name: { type: 'string' },
-        description: { type: 'string' },
+        name: { type: 'string', minLength: 1, maxLength: 200 },
+        description: { type: 'string', maxLength: 2000 },
       },
       required: ['name'],
     },
+    validator: z.object({
+      name: z.string().min(1).max(200),
+      description: z.string().max(2000).optional(),
+    }),
+    run: (i, c) => c.createProject(i.name, i.description),
   },
   {
-    name: 'list_people_in_account',
-    description: 'اعرض كل الأشخاص المرتبطين بالحساب.',
-    input_schema: { type: 'object', properties: {} },
-  },
-  {
-    name: 'list_people_in_project',
-    description: 'اعرض الأشخاص الذين لهم صلاحية الوصول إلى مشروع معين.',
-    input_schema: {
+    name: 'trash_project',
+    risk: 'destructive',
+    description:
+      'انقل مشروعاً إلى سلة المحذوفات. إجراء يمكن استعادته خلال 30 يوماً فقط، وبعدها يُحذف نهائياً.',
+    effect: (i) =>
+      `سأُرسل المشروع رقم ${i.project_id} إلى سلة المحذوفات. يمكن استعادته خلال 30 يوماً.`,
+    schema: {
       type: 'object',
       properties: { project_id: { type: 'integer' } },
       required: ['project_id'],
     },
+    validator: z.object({ project_id: idSchema }),
+    run: (i, c) => c.trashProject(i.project_id),
+  },
+
+  // ───────── People ─────────
+  {
+    name: 'list_people_in_account',
+    risk: 'readonly',
+    description: 'اعرض جميع الأشخاص على الحساب.',
+    effect: () => 'سأعرض جميع الأعضاء على الحساب.',
+    schema: { type: 'object', properties: {} },
+    validator: z.object({}).passthrough(),
+    run: (_i, c) => c.listPeopleInAccount(),
+  },
+  {
+    name: 'list_people_in_project',
+    risk: 'readonly',
+    description: 'اعرض الأشخاص الذين لهم صلاحية الوصول لمشروع معين.',
+    effect: (i) => `سأعرض أعضاء المشروع رقم ${i.project_id}.`,
+    schema: {
+      type: 'object',
+      properties: { project_id: { type: 'integer' } },
+      required: ['project_id'],
+    },
+    validator: z.object({ project_id: idSchema }),
+    run: (i, c) => c.listPeopleInProject(i.project_id),
   },
   {
     name: 'grant_people_to_project',
-    description: 'أضف أشخاصاً إلى مشروع عبر معرفاتهم. يتطلب تأكيداً.',
-    input_schema: {
+    risk: 'write',
+    description: 'أضف أشخاصاً إلى مشروع عبر معرفاتهم.',
+    effect: (i) =>
+      `سأضيف ${i.person_ids.length} شخصاً إلى المشروع رقم ${i.project_id}. سيرون كل المحتوى من لحظة الإضافة.`,
+    schema: {
       type: 'object',
       properties: {
         project_id: { type: 'integer' },
-        person_ids: { type: 'array', items: { type: 'integer' } },
+        person_ids: { type: 'array', items: { type: 'integer' }, minItems: 1 },
       },
       required: ['project_id', 'person_ids'],
     },
+    validator: z.object({ project_id: idSchema, person_ids: z.array(idSchema).min(1).max(200) }),
+    run: (i, c) => c.grantPeopleToProject(i.project_id, i.person_ids),
   },
   {
     name: 'revoke_people_from_project',
-    description: 'أزل صلاحية أشخاص من مشروع. يتطلب تأكيداً.',
-    input_schema: {
+    risk: 'destructive',
+    description: 'أزل صلاحية أشخاص من مشروع. لن يصلوا إلى المحتوى بعدها.',
+    effect: (i) =>
+      `سأُزيل صلاحية ${i.person_ids.length} شخصاً من المشروع رقم ${i.project_id}. سيفقدون الوصول مباشرة.`,
+    schema: {
       type: 'object',
       properties: {
         project_id: { type: 'integer' },
-        person_ids: { type: 'array', items: { type: 'integer' } },
+        person_ids: { type: 'array', items: { type: 'integer' }, minItems: 1 },
       },
       required: ['project_id', 'person_ids'],
     },
+    validator: z.object({ project_id: idSchema, person_ids: z.array(idSchema).min(1).max(200) }),
+    run: (i, c) => c.revokePeopleFromProject(i.project_id, i.person_ids),
   },
+
+  // ───────── Todo sets & lists ─────────
   {
     name: 'list_todo_lists',
-    description: 'اعرض قوائم المهام داخل todoset معين للمشروع.',
-    input_schema: {
+    risk: 'readonly',
+    description: 'اعرض قوائم المهام داخل todoset لمشروع.',
+    effect: (i) =>
+      `سأعرض قوائم المهام للـ todoset رقم ${i.todoset_id} في المشروع ${i.project_id}.`,
+    schema: {
       type: 'object',
-      properties: {
-        project_id: { type: 'integer' },
-        todoset_id: { type: 'integer' },
-      },
+      properties: { project_id: { type: 'integer' }, todoset_id: { type: 'integer' } },
       required: ['project_id', 'todoset_id'],
     },
+    validator: z.object({ project_id: idSchema, todoset_id: idSchema }),
+    run: (i, c) => c.listTodoLists(i.project_id, i.todoset_id),
   },
   {
     name: 'create_todo_list',
+    risk: 'write',
     description: 'أنشئ قائمة مهام جديدة داخل مشروع.',
-    input_schema: {
+    effect: (i) => `سأنشئ قائمة مهام جديدة باسم «${i.name}» داخل المشروع ${i.project_id}.`,
+    schema: {
       type: 'object',
       properties: {
         project_id: { type: 'integer' },
         todoset_id: { type: 'integer' },
-        name: { type: 'string' },
-        description: { type: 'string' },
+        name: { type: 'string', minLength: 1, maxLength: 200 },
+        description: { type: 'string', maxLength: 2000 },
       },
       required: ['project_id', 'todoset_id', 'name'],
     },
+    validator: z.object({
+      project_id: idSchema,
+      todoset_id: idSchema,
+      name: z.string().min(1).max(200),
+      description: z.string().max(2000).optional(),
+    }),
+    run: (i, c) => c.createTodoList(i.project_id, i.todoset_id, i.name, i.description),
   },
+
+  // ───────── Todos ─────────
   {
     name: 'list_todos',
+    risk: 'readonly',
     description: 'اعرض مهام قائمة معينة (active أو completed).',
-    input_schema: {
+    effect: (i) =>
+      `سأعرض مهام القائمة ${i.todolist_id} بحالة ${i.status ?? 'active'}.`,
+    schema: {
       type: 'object',
       properties: {
         project_id: { type: 'integer' },
@@ -114,52 +215,104 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
       },
       required: ['project_id', 'todolist_id'],
     },
+    validator: z.object({
+      project_id: idSchema,
+      todolist_id: idSchema,
+      status: z.enum(['active', 'completed']).optional(),
+    }),
+    run: (i, c) => c.listTodos(i.project_id, i.todolist_id, i.status ?? 'active'),
+  },
+  {
+    name: 'get_todo',
+    risk: 'readonly',
+    description: 'اجلب تفاصيل مهمة واحدة بكامل حقولها.',
+    effect: (i) => `سأجلب تفاصيل المهمة ${i.todo_id}.`,
+    schema: {
+      type: 'object',
+      properties: { project_id: { type: 'integer' }, todo_id: { type: 'integer' } },
+      required: ['project_id', 'todo_id'],
+    },
+    validator: z.object({ project_id: idSchema, todo_id: idSchema }),
+    run: (i, c) => c.getTodo(i.project_id, i.todo_id),
   },
   {
     name: 'create_todo',
-    description: 'أضف مهمة جديدة إلى قائمة مهام داخل مشروع. يمكن إسنادها لأشخاص وتحديد تاريخ استحقاق.',
-    input_schema: {
+    risk: 'write',
+    description:
+      'أنشئ مهمة جديدة في قائمة مهام. يمكن إسنادها لأشخاص وإرسال إشعار وتحديد تاريخ استحقاق.',
+    effect: (i) => {
+      const parts: string[] = [`سأنشئ مهمة «${i.content}» في القائمة ${i.todolist_id}`];
+      if (i.assignee_ids?.length) parts.push(`مسندة لـ ${i.assignee_ids.length} شخصاً`);
+      if (i.due_on) parts.push(`تستحق ${i.due_on}`);
+      if (i.notify) parts.push('مع إرسال إشعار للمسندين');
+      return parts.join('، ') + '.';
+    },
+    schema: {
       type: 'object',
       properties: {
         project_id: { type: 'integer' },
         todolist_id: { type: 'integer' },
-        content: { type: 'string', description: 'نص المهمة.' },
-        description: { type: 'string', description: 'وصف HTML اختياري.' },
+        content: { type: 'string', minLength: 1, maxLength: 2000 },
+        description: { type: 'string', maxLength: 50_000 },
         assignee_ids: { type: 'array', items: { type: 'integer' } },
-        due_on: { type: 'string', description: 'YYYY-MM-DD.' },
+        due_on: { type: 'string', description: 'YYYY-MM-DD' },
         notify: { type: 'boolean' },
       },
       required: ['project_id', 'todolist_id', 'content'],
     },
+    validator: z.object({
+      project_id: idSchema,
+      todolist_id: idSchema,
+      content: z.string().min(1).max(2000),
+      description: z.string().max(50_000).optional(),
+      assignee_ids: z.array(idSchema).max(500).optional(),
+      due_on: z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/)
+        .optional(),
+      notify: z.boolean().optional(),
+    }),
+    run: (i, c) =>
+      c.createTodo(i.project_id, i.todolist_id, i.content, {
+        description: i.description,
+        assignee_ids: i.assignee_ids,
+        due_on: i.due_on,
+        notify: i.notify,
+      }),
   },
   {
     name: 'complete_todo',
+    risk: 'write',
     description: 'علِّم مهمة كمُنجَزة.',
-    input_schema: {
+    effect: (i) => `سأُغلق المهمة ${i.todo_id} في المشروع ${i.project_id}.`,
+    schema: {
       type: 'object',
-      properties: {
-        project_id: { type: 'integer' },
-        todo_id: { type: 'integer' },
-      },
+      properties: { project_id: { type: 'integer' }, todo_id: { type: 'integer' } },
       required: ['project_id', 'todo_id'],
     },
+    validator: z.object({ project_id: idSchema, todo_id: idSchema }),
+    run: (i, c) => c.completeTodo(i.project_id, i.todo_id),
   },
   {
     name: 'reopen_todo',
+    risk: 'write',
     description: 'أعِد فتح مهمة مُنجَزة.',
-    input_schema: {
+    effect: (i) => `سأُعيد فتح المهمة ${i.todo_id}.`,
+    schema: {
       type: 'object',
-      properties: {
-        project_id: { type: 'integer' },
-        todo_id: { type: 'integer' },
-      },
+      properties: { project_id: { type: 'integer' }, todo_id: { type: 'integer' } },
       required: ['project_id', 'todo_id'],
     },
+    validator: z.object({ project_id: idSchema, todo_id: idSchema }),
+    run: (i, c) => c.reopenTodo(i.project_id, i.todo_id),
   },
   {
     name: 'update_todo',
-    description: 'حدِّث حقول مهمة (المحتوى، المسندون، تاريخ الاستحقاق…).',
-    input_schema: {
+    risk: 'write',
+    description: 'حدِّث حقول مهمة (المحتوى، الوصف، المسندون، تاريخ الاستحقاق…).',
+    effect: (i) =>
+      `سأُحدّث حقول المهمة ${i.todo_id}: ${Object.keys(i.patch ?? {}).join('، ') || 'لا شيء'}.`,
+    schema: {
       type: 'object',
       properties: {
         project_id: { type: 'integer' },
@@ -168,163 +321,252 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
       },
       required: ['project_id', 'todo_id', 'patch'],
     },
+    validator: z.object({
+      project_id: idSchema,
+      todo_id: idSchema,
+      patch: z.record(z.any()),
+    }),
+    run: (i, c) => c.updateTodo(i.project_id, i.todo_id, i.patch),
   },
   {
-    name: 'list_messages',
-    description: 'اعرض رسائل لوحة رسائل المشروع.',
-    input_schema: {
+    name: 'trash_todo',
+    risk: 'destructive',
+    description: 'انقل مهمة إلى سلة المحذوفات. يمكن استعادتها خلال 30 يوماً.',
+    effect: (i) =>
+      `سأُرسل المهمة ${i.todo_id} إلى سلة المحذوفات. قابلة للاستعادة 30 يوماً.`,
+    schema: {
       type: 'object',
-      properties: {
-        project_id: { type: 'integer' },
-        board_id: { type: 'integer' },
-      },
+      properties: { project_id: { type: 'integer' }, todo_id: { type: 'integer' } },
+      required: ['project_id', 'todo_id'],
+    },
+    validator: z.object({ project_id: idSchema, todo_id: idSchema }),
+    run: (i, c) => c.trashTodo(i.project_id, i.todo_id),
+  },
+
+  // ───────── Messages & Comments ─────────
+  {
+    name: 'list_messages',
+    risk: 'readonly',
+    description: 'اعرض رسائل لوحة رسائل المشروع.',
+    effect: (i) => `سأعرض آخر رسائل لوحة ${i.board_id}.`,
+    schema: {
+      type: 'object',
+      properties: { project_id: { type: 'integer' }, board_id: { type: 'integer' } },
       required: ['project_id', 'board_id'],
     },
+    validator: z.object({ project_id: idSchema, board_id: idSchema }),
+    run: (i, c) => c.listMessages(i.project_id, i.board_id),
   },
   {
     name: 'post_message',
+    risk: 'write',
     description: 'انشر رسالة جديدة على لوحة رسائل المشروع.',
-    input_schema: {
+    effect: (i) =>
+      `سأنشر رسالة «${i.subject}» على لوحة ${i.board_id}${i.status === 'draft' ? ' كمسودة' : ' (ستصل إشعارات)'}.`,
+    schema: {
       type: 'object',
       properties: {
         project_id: { type: 'integer' },
         board_id: { type: 'integer' },
-        subject: { type: 'string' },
-        content: { type: 'string', description: 'محتوى HTML.' },
+        subject: { type: 'string', minLength: 1, maxLength: 300 },
+        content: { type: 'string', minLength: 1, maxLength: 50_000 },
         status: { type: 'string', enum: ['active', 'draft'] },
       },
       required: ['project_id', 'board_id', 'subject', 'content'],
     },
+    validator: z.object({
+      project_id: idSchema,
+      board_id: idSchema,
+      subject: z.string().min(1).max(300),
+      content: htmlContent,
+      status: z.enum(['active', 'draft']).optional(),
+    }),
+    run: (i, c) =>
+      c.postMessage(i.project_id, i.board_id, i.subject, i.content, i.status ?? 'active'),
   },
   {
     name: 'list_comments',
+    risk: 'readonly',
     description: 'اعرض التعليقات على تسجيل (مهمة، رسالة، مستند…).',
-    input_schema: {
+    effect: (i) => `سأعرض التعليقات على التسجيل ${i.recording_id}.`,
+    schema: {
       type: 'object',
-      properties: {
-        project_id: { type: 'integer' },
-        recording_id: { type: 'integer' },
-      },
+      properties: { project_id: { type: 'integer' }, recording_id: { type: 'integer' } },
       required: ['project_id', 'recording_id'],
     },
+    validator: z.object({ project_id: idSchema, recording_id: idSchema }),
+    run: (i, c) => c.listComments(i.project_id, i.recording_id),
   },
   {
     name: 'post_comment',
+    risk: 'write',
     description: 'أضف تعليقاً على تسجيل داخل مشروع.',
-    input_schema: {
+    effect: (i) =>
+      `سأضيف تعليقاً على التسجيل ${i.recording_id} (${i.content.length} حرفاً).`,
+    schema: {
       type: 'object',
       properties: {
         project_id: { type: 'integer' },
         recording_id: { type: 'integer' },
-        content: { type: 'string', description: 'محتوى HTML.' },
+        content: { type: 'string', minLength: 1, maxLength: 50_000 },
       },
       required: ['project_id', 'recording_id', 'content'],
     },
+    validator: z.object({
+      project_id: idSchema,
+      recording_id: idSchema,
+      content: htmlContent,
+    }),
+    run: (i, c) => c.postComment(i.project_id, i.recording_id, i.content),
   },
+
+  // ───────── Campfire ─────────
   {
     name: 'list_campfires',
-    description: 'اعرض غرف المحادثة (Campfires) المتاحة عبر المشاريع.',
-    input_schema: { type: 'object', properties: {} },
+    risk: 'readonly',
+    description: 'اعرض غرف Campfire عبر المشاريع.',
+    effect: () => 'سأعرض جميع غرف Campfire المتاحة.',
+    schema: { type: 'object', properties: {} },
+    validator: z.object({}).passthrough(),
+    run: (_i, c) => c.listCampfires(),
   },
   {
     name: 'post_campfire_line',
+    risk: 'write',
     description: 'أرسل سطراً نصياً إلى Campfire لمشروع معين.',
-    input_schema: {
+    effect: (i) =>
+      `سأرسل سطراً في Campfire ${i.campfire_id}: «${i.content.slice(0, 80)}${i.content.length > 80 ? '…' : ''}».`,
+    schema: {
       type: 'object',
       properties: {
         project_id: { type: 'integer' },
         campfire_id: { type: 'integer' },
-        content: { type: 'string' },
+        content: { type: 'string', minLength: 1, maxLength: 10_000 },
       },
       required: ['project_id', 'campfire_id', 'content'],
     },
+    validator: z.object({
+      project_id: idSchema,
+      campfire_id: idSchema,
+      content: z.string().min(1).max(10_000),
+    }),
+    run: (i, c) => c.postCampfireLine(i.project_id, i.campfire_id, i.content),
   },
+
+  // ───────── Personal ─────────
   {
     name: 'my_schedule',
+    risk: 'readonly',
     description: 'جلب جدول المستخدم الحالي.',
-    input_schema: { type: 'object', properties: {} },
+    effect: () => 'سأجلب جدولي الحالي.',
+    schema: { type: 'object', properties: {} },
+    validator: z.object({}).passthrough(),
+    run: (_i, c) => c.mySchedule(),
   },
   {
     name: 'my_assignments',
+    risk: 'readonly',
     description: 'جلب المهام المسندة إلى المستخدم الحالي.',
-    input_schema: { type: 'object', properties: {} },
+    effect: () => 'سأجلب المهام المسندة إليّ.',
+    schema: { type: 'object', properties: {} },
+    validator: z.object({}).passthrough(),
+    run: (_i, c) => c.myAssignments(),
   },
   {
     name: 'my_overdue',
+    risk: 'readonly',
     description: 'جلب المهام المتأخرة للمستخدم الحالي.',
-    input_schema: { type: 'object', properties: {} },
+    effect: () => 'سأجلب المهام المتأخرة.',
+    schema: { type: 'object', properties: {} },
+    validator: z.object({}).passthrough(),
+    run: (_i, c) => c.myOverdue(),
   },
 ];
 
+function withConfirmed(schema: Record<string, any>, risk: Risk): Record<string, any> {
+  if (risk === 'readonly') return schema;
+  const properties = { ...(schema.properties ?? {}) };
+  properties.confirmed = {
+    type: 'boolean',
+    description:
+      risk === 'destructive'
+        ? 'أرسلها كـ true فقط بعد أن يوافق المستخدم صراحةً على هذا الإجراء الذي لا يمكن التراجع عنه بسهولة.'
+        : 'أرسلها كـ true فقط بعد موافقة المستخدم الصريحة.',
+  };
+  return { ...schema, properties };
+}
+
+export const TOOL_SPECS = SPECS;
+
+export const AGENT_TOOLS: Anthropic.Tool[] = SPECS.map((s) => ({
+  name: s.name,
+  description:
+    s.risk === 'readonly'
+      ? s.description
+      : `${s.description}\n\n⚠ هذا الإجراء ${s.risk === 'destructive' ? 'لا يمكن التراجع عنه بسهولة' : 'يُحدث تغييراً'}. استدعِه أولاً دون confirmed لتحصل على معاينة، اعرضها للمستخدم واطلب تأكيده، ثم أعد الاستدعاء مع confirmed=true.`,
+  input_schema: withConfirmed(s.schema, s.risk) as any,
+}));
+
+export function findSpec(name: string): ToolSpec | undefined {
+  return SPECS.find((s) => s.name === name);
+}
+
+export type DispatchResult =
+  | { kind: 'ok'; output: unknown }
+  | { kind: 'preview'; risk: Risk; effect: string; warning?: string }
+  | { kind: 'error'; message: string; detail?: string; httpStatus?: number };
+
 export async function dispatchTool(
   name: string,
-  input: any,
+  rawInput: unknown,
   client: BasecampClient,
-): Promise<unknown> {
-  switch (name) {
-    case 'list_projects':
-      return client.listProjects(input?.status ?? 'active');
-    case 'get_project':
-      return client.getProject(input.project_id);
-    case 'create_project':
-      return client.createProject(input.name, input.description);
-    case 'list_people_in_account':
-      return client.listPeopleInAccount();
-    case 'list_people_in_project':
-      return client.listPeopleInProject(input.project_id);
-    case 'grant_people_to_project':
-      return client.grantPeopleToProject(input.project_id, input.person_ids);
-    case 'revoke_people_from_project':
-      return client.revokePeopleFromProject(input.project_id, input.person_ids);
-    case 'list_todo_lists':
-      return client.listTodoLists(input.project_id, input.todoset_id);
-    case 'create_todo_list':
-      return client.createTodoList(
-        input.project_id,
-        input.todoset_id,
-        input.name,
-        input.description,
-      );
-    case 'list_todos':
-      return client.listTodos(input.project_id, input.todolist_id, input.status ?? 'active');
-    case 'create_todo':
-      return client.createTodo(input.project_id, input.todolist_id, input.content, {
-        description: input.description,
-        assignee_ids: input.assignee_ids,
-        due_on: input.due_on,
-        notify: input.notify,
-      });
-    case 'complete_todo':
-      return client.completeTodo(input.project_id, input.todo_id);
-    case 'reopen_todo':
-      return client.reopenTodo(input.project_id, input.todo_id);
-    case 'update_todo':
-      return client.updateTodo(input.project_id, input.todo_id, input.patch);
-    case 'list_messages':
-      return client.listMessages(input.project_id, input.board_id);
-    case 'post_message':
-      return client.postMessage(
-        input.project_id,
-        input.board_id,
-        input.subject,
-        input.content,
-        input.status ?? 'active',
-      );
-    case 'list_comments':
-      return client.listComments(input.project_id, input.recording_id);
-    case 'post_comment':
-      return client.postComment(input.project_id, input.recording_id, input.content);
-    case 'list_campfires':
-      return client.listCampfires();
-    case 'post_campfire_line':
-      return client.postCampfireLine(input.project_id, input.campfire_id, input.content);
-    case 'my_schedule':
-      return client.mySchedule();
-    case 'my_assignments':
-      return client.myAssignments();
-    case 'my_overdue':
-      return client.myOverdue();
-    default:
-      throw new Error(`Unknown tool: ${name}`);
+): Promise<DispatchResult> {
+  const spec = findSpec(name);
+  if (!spec) {
+    return { kind: 'error', message: `أداة غير معروفة: ${name}` };
+  }
+
+  // Strip `confirmed` from model input before validating the domain schema.
+  const { confirmed, ...toolInput } = (rawInput ?? {}) as Record<string, any>;
+
+  const parsed = spec.validator.safeParse(toolInput);
+  if (!parsed.success) {
+    return {
+      kind: 'error',
+      message: `مدخلات غير صالحة لـ ${name}`,
+      detail: parsed.error.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join('؛ '),
+    };
+  }
+  const input = parsed.data as any;
+
+  // Server-enforced safety gate.
+  if (spec.risk !== 'readonly' && confirmed !== true) {
+    return {
+      kind: 'preview',
+      risk: spec.risk,
+      effect: spec.effect(input),
+      warning:
+        spec.risk === 'destructive'
+          ? 'هذا إجراء لا يمكن التراجع عنه بسهولة. لا تُنفّذ دون تأكيد صريح من المستخدم.'
+          : undefined,
+    };
+  }
+
+  try {
+    const output = await spec.run(input, client);
+    return { kind: 'ok', output };
+  } catch (err) {
+    if (err instanceof BasecampError) {
+      return {
+        kind: 'error',
+        message: err.arabicMessage,
+        detail: err.message,
+        httpStatus: err.status,
+      };
+    }
+    return {
+      kind: 'error',
+      message: err instanceof Error ? err.message : 'خطأ غير معروف',
+    };
   }
 }

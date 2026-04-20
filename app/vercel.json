@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "regions": ["fra1"],
+  "functions": {
+    "src/app/api/agent/route.ts": { "maxDuration": 60 },
+    "src/app/api/agent/suggestions/route.ts": { "maxDuration": 15 },
+    "src/app/api/auth/callback/route.ts": { "maxDuration": 15 },
+    "src/app/api/basecamp/projects/route.ts": { "maxDuration": 15 }
+  }
+}

@@ -1,52 +1,93 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
-import { BasecampClient } from '@/lib/basecamp';
+import { BasecampClient, BasecampError } from '@/lib/basecamp';
 import { env } from '@/lib/env';
 import { readSessionId } from '@/lib/session';
 import { appendAgentMessage, loadAgentHistory } from '@/lib/vault';
-import { AGENT_TOOLS, dispatchTool } from '@/lib/agentTools';
+import { AGENT_TOOLS, dispatchTool, findSpec } from '@/lib/agentTools';
+import { clearAgentHistory, loadWindowedHistory } from '@/lib/memory';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+// Vercel: the whole agent loop (many tool calls → many LLM turns) can take a
+// while. 60s is the Pro/Enterprise ceiling; Hobby caps at 10s and this route
+// will need upgrading there. Keep streaming so we never hit request timeouts.
+export const maxDuration = 60;
 
 const MODEL = 'claude-opus-4-7';
 const MAX_TURNS = 8;
+const MAX_TOOL_OUTPUT_CHARS = 8000;
+const HISTORY_TOKEN_BUDGET = 40_000;
 
 const SYSTEM_PROMPT = `أنت "مجال"، وكيل ثمانية الذكي لإدارة Basecamp باللغة العربية.
 
-# القواعد
-- أجب دائماً باللغة العربية الفصحى المُبسَّطة، بلهجة مهنية هادئة تعكس هوية ثمانية.
-- نفّذ مهام المستخدم عبر الأدوات المتاحة؛ لا تخترع معرفات (IDs) أو بيانات لم تطلبها الأداة.
-- قبل استدعاء أي أداة تُحدِث تغييراً (إنشاء مشروع، دعوة/إزالة أشخاص، إنشاء/تحديث/إنهاء/إعادة فتح مهمة، نشر رسالة/تعليق، إرسال Campfire): اعرض ملخصاً للخطوة واطلب تأكيداً صريحاً من المستخدم، ثم نفّذ. إذا قال المستخدم في رسالته "نفّذ" أو "أكّدت" فلا حاجة لطلب التأكيد مرة أخرى لنفس الخطوة.
-- استخدم list_projects أولاً إذا لم يحدّد المستخدم المشروع، ثم get_project للحصول على dock (يحتوي على معرفات todoset, message_board, campfire).
-- كن موجزاً في الردود: لا تُظهر JSON خاماً، بل لخّص النتائج في قائمة عربية قصيرة.
-- إن فشلت أداة، اعرض الخطأ بلغة واضحة واقترح بديلاً.`;
+# القواعد الذهبية
+- أجب دائماً بالعربية الفصحى المُبسَّطة، بلهجة مهنية هادئة تعكس هوية ثمانية.
+- نفّذ مهام المستخدم عبر الأدوات المتاحة فقط — لا تخترع معرفات (IDs) أو بيانات.
+- استخدم list_projects أولاً إذا لم يحدّد المستخدم المشروع، ثم get_project للحصول على dock (يحوي معرفات todoset / message_board / campfire).
+- لخّص النتائج في قائمة عربية موجزة، لا تُظهر JSON خاماً.
 
-type Anthro = Anthropic;
+# السلامة (بالغة الأهمية)
+- قبل أي أداة تُحدِث تغييراً (إنشاء، تحديث، إسناد، نشر، تعليق، Campfire) أو أي إجراء لا رجعة فيه (حذف، إزالة عضو، نقل إلى المهملات):
+  1) استدعِ الأداة دون confirmed. ستحصل على معاينة رسمية (preview) توضّح تأثير الإجراء بدقة.
+  2) اعرض المعاينة للمستخدم بلغة عربية واضحة، مع تحذير إضافي للإجراءات التي لا يمكن التراجع عنها بسهولة.
+  3) انتظر موافقة المستخدم الصريحة في رسالة لاحقة. لا تفترض الموافقة.
+  4) عند الموافقة، أعد استدعاء الأداة نفسها بنفس المدخلات مع confirmed=true.
+- إذا رفض المستخدم أو تردّد: لا تنفّذ، واقترح بديلاً أخف.
+- إذا فشلت أداة، اعرض السبب بالعربية (مثل: انتهاء صلاحية الربط، عدم وجود صلاحيات، عنصر غير موجود) واقترح الخطوة التالية بدلاً من المحاولة مجدداً بلا تعديل.
+
+# اقتراحات ذكية
+- بعد كل خطوة، اقترح على المستخدم خطوة منطقية تالية (مثال: بعد list_projects → "هل تريد فتح أحدها؟"؛ بعد my_overdue → "هل أُعيد جدولة إحدى المتأخرات؟").`;
 
 type ContentBlock =
   | { type: 'text'; text: string }
   | { type: 'tool_use'; id: string; name: string; input: unknown }
   | { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean };
 
-type StoredTurn = { role: 'user' | 'assistant' | 'tool'; content: unknown };
+type PublicToolEvent = {
+  name: string;
+  risk: 'readonly' | 'write' | 'destructive';
+  kind: 'ok' | 'preview' | 'error';
+  effect?: string;
+  warning?: string;
+  error?: string;
+  detail?: string;
+};
 
-function truncate(value: unknown, max = 8000): string {
+function truncate(value: unknown, max = MAX_TOOL_OUTPUT_CHARS): string {
   const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
   return text.length > max ? `${text.slice(0, max)}\n… [تم اختصار الناتج]` : text;
 }
 
-function toMessages(history: StoredTurn[]): Anthropic.MessageParam[] {
-  const out: Anthropic.MessageParam[] = [];
-  for (const turn of history) {
-    if (turn.role === 'user' || turn.role === 'assistant') {
-      out.push({
-        role: turn.role,
-        content: turn.content as Anthropic.MessageParam['content'],
-      });
-    }
+function stringifyResultForModel(result: any, specName: string): { text: string; isError: boolean } {
+  if (result.kind === 'ok') {
+    return { text: truncate(result.output ?? 'ok'), isError: false };
   }
-  return out;
+  if (result.kind === 'preview') {
+    const payload = {
+      status: 'preview_required',
+      risk: result.risk,
+      effect: result.effect,
+      warning: result.warning,
+      instruction:
+        'اعرض هذه المعاينة للمستخدم بالعربية ثم انتظر موافقته الصريحة. لا تنفّذ دون إعادة الاستدعاء بـ confirmed=true.',
+      how_to_execute: `أعد استدعاء ${specName} بنفس المدخلات مع إضافة confirmed=true.`,
+    };
+    return { text: JSON.stringify(payload, null, 2), isError: false };
+  }
+  return {
+    text: JSON.stringify(
+      {
+        status: 'error',
+        message: result.message,
+        detail: result.detail,
+        http_status: result.httpStatus,
+      },
+      null,
+      2,
+    ),
+    isError: true,
+  };
 }
 
 export async function POST(req: NextRequest) {
@@ -64,19 +105,25 @@ export async function POST(req: NextRequest) {
   }
   const userText = body.message?.trim();
   if (!userText) return NextResponse.json({ error: 'empty_message' }, { status: 400 });
+  if (userText.length > 8000) {
+    return NextResponse.json(
+      { error: 'message_too_long', detail: 'الرسالة طويلة جداً. حدّها 8000 حرف.' },
+      { status: 413 },
+    );
+  }
 
-  const client: Anthro = new Anthropic({ apiKey: env.anthropic.apiKey });
+  const client = new Anthropic({ apiKey: env.anthropic.apiKey });
 
-  const history = (await loadAgentHistory(sid)) as StoredTurn[];
-  const messages: Anthropic.MessageParam[] = toMessages(history);
+  // Load trimmed, token-aware history.
+  const messages = await loadWindowedHistory(sid, HISTORY_TOKEN_BUDGET);
 
   const userBlocks: ContentBlock[] = [{ type: 'text', text: userText }];
   messages.push({ role: 'user', content: userBlocks as any });
   await appendAgentMessage(sid, 'user', userBlocks);
 
-  const toolInvocations: Array<{ name: string; input: unknown; output: unknown; error?: string }> = [];
-
+  const toolEvents: PublicToolEvent[] = [];
   let finalText = '';
+  let stoppedEarly: string | null = null;
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     let response: Anthropic.Message;
@@ -84,7 +131,14 @@ export async function POST(req: NextRequest) {
       const stream = client.messages.stream({
         model: MODEL,
         max_tokens: 4096,
-        system: SYSTEM_PROMPT,
+        system: [
+          {
+            type: 'text',
+            text: SYSTEM_PROMPT,
+            // System prompt + tool list rarely change → cache them across turns.
+            cache_control: { type: 'ephemeral' },
+          },
+        ] as any,
         thinking: { type: 'adaptive' },
         tools: AGENT_TOOLS,
         messages,
@@ -93,17 +147,26 @@ export async function POST(req: NextRequest) {
     } catch (err) {
       if (err instanceof Anthropic.RateLimitError) {
         return NextResponse.json(
-          { error: 'rate_limited', detail: 'تم تجاوز حدّ الاستخدام. حاول بعد قليل.' },
+          { error: 'rate_limited', detail: 'تم تجاوز حدّ Anthropic. انتظر ثوانٍ ثم حاول مجدداً.' },
           { status: 429 },
+        );
+      }
+      if (err instanceof Anthropic.AuthenticationError) {
+        return NextResponse.json(
+          { error: 'anthropic_auth', detail: 'مفتاح Anthropic غير صالح. راجع إعدادات الخادم.' },
+          { status: 500 },
         );
       }
       if (err instanceof Anthropic.APIError) {
         return NextResponse.json(
-          { error: 'anthropic_error', detail: err.message },
+          { error: 'anthropic_error', detail: err.message, status: err.status },
           { status: 502 },
         );
       }
-      throw err;
+      return NextResponse.json(
+        { error: 'unknown', detail: err instanceof Error ? err.message : 'خطأ غير معروف' },
+        { status: 500 },
+      );
     }
 
     messages.push({ role: 'assistant', content: response.content });
@@ -123,37 +186,68 @@ export async function POST(req: NextRequest) {
 
     const toolResultBlocks: ContentBlock[] = [];
     for (const tu of toolUses) {
-      try {
-        const output = await dispatchTool(tu.name, tu.input, basecamp);
-        toolInvocations.push({ name: tu.name, input: tu.input, output });
-        toolResultBlocks.push({
-          type: 'tool_result',
-          tool_use_id: tu.id,
-          content: truncate(output ?? 'ok'),
-        });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        toolInvocations.push({ name: tu.name, input: tu.input, output: null, error: message });
-        toolResultBlocks.push({
-          type: 'tool_result',
-          tool_use_id: tu.id,
-          content: `فشل التنفيذ: ${message}`,
-          is_error: true,
-        });
+      const spec = findSpec(tu.name);
+      const risk = spec?.risk ?? 'readonly';
+      const result = await dispatchTool(tu.name, tu.input, basecamp);
+
+      toolEvents.push({
+        name: tu.name,
+        risk,
+        kind: result.kind,
+        effect: result.kind === 'preview' ? result.effect : undefined,
+        warning: result.kind === 'preview' ? result.warning : undefined,
+        error: result.kind === 'error' ? result.message : undefined,
+        detail: result.kind === 'error' ? result.detail : undefined,
+      });
+
+      // Auth failure inside a tool → the session is dead. Stop early so the
+      // client can redirect to /connect instead of burning more LLM calls.
+      if (result.kind === 'error' && result.httpStatus === 401) {
+        stoppedEarly = 'basecamp_unauthorized';
       }
+
+      const { text, isError } = stringifyResultForModel(result, tu.name);
+      toolResultBlocks.push({
+        type: 'tool_result',
+        tool_use_id: tu.id,
+        content: text,
+        is_error: isError,
+      });
     }
 
     messages.push({ role: 'user', content: toolResultBlocks as any });
     await appendAgentMessage(sid, 'tool', toolResultBlocks);
+
+    if (stoppedEarly) break;
+
+    if (turn === MAX_TURNS - 1) {
+      stoppedEarly = 'max_turns';
+    }
+  }
+
+  if (stoppedEarly === 'basecamp_unauthorized') {
+    return NextResponse.json(
+      {
+        reply:
+          finalText ||
+          'انتهت صلاحية الربط مع بيسكامب أثناء التنفيذ. يرجى إعادة الربط من صفحة الاتصال.',
+        tools: toolEvents,
+        reconnect: true,
+      },
+      { status: 200 },
+    );
+  }
+
+  if (stoppedEarly === 'max_turns') {
+    finalText =
+      finalText ||
+      'توقفتُ بعد الوصول إلى الحد الأقصى لخطوات التفكير. يرجى إعادة صياغة الطلب بصيغة أبسط أو تقسيمه.';
   }
 
   return NextResponse.json({
     reply: finalText || 'تم.',
-    tools: toolInvocations.map((t) => ({
-      name: t.name,
-      ok: !t.error,
-      error: t.error,
-    })),
+    tools: toolEvents,
+    turn_limit_hit: stoppedEarly === 'max_turns',
   });
 }
 
@@ -173,4 +267,11 @@ export async function GET() {
       return text ? [{ role: h.role, text, at: h.created_at }] : [];
     });
   return NextResponse.json({ timeline });
+}
+
+export async function DELETE() {
+  const sid = readSessionId();
+  if (!sid) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  await clearAgentHistory(sid);
+  return NextResponse.json({ ok: true });
 }

@@ -5,6 +5,64 @@ import { loadSession, saveSession, updateTokens, type StoredBasecampSession } fr
 const LAUNCHPAD = 'https://launchpad.37signals.com';
 const API_BASE = 'https://3.basecampapi.com';
 
+// ─────────────────────────── Typed errors ───────────────────────────
+
+export class BasecampError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly kind:
+      | 'unauthorized'
+      | 'forbidden'
+      | 'not_found'
+      | 'rate_limited'
+      | 'conflict'
+      | 'validation'
+      | 'server'
+      | 'network'
+      | 'unknown',
+    public readonly body?: string,
+  ) {
+    super(message);
+    this.name = 'BasecampError';
+  }
+
+  /** Human-readable Arabic summary for surfacing to the user/agent. */
+  get arabicMessage(): string {
+    switch (this.kind) {
+      case 'unauthorized':
+        return 'انتهت صلاحية الربط مع بيسكامب. أعد الاتصال من صفحة الربط.';
+      case 'forbidden':
+        return 'لا تملك صلاحيات لإجراء هذه العملية في بيسكامب.';
+      case 'not_found':
+        return 'العنصر المطلوب غير موجود (قد يكون مؤرشفاً أو محذوفاً).';
+      case 'rate_limited':
+        return 'تم تجاوز حدّ طلبات بيسكامب. سأحاول لاحقاً.';
+      case 'conflict':
+        return 'هناك تعارض مع الحالة الحالية في بيسكامب.';
+      case 'validation':
+        return 'البيانات المقدّمة غير صالحة في بيسكامب.';
+      case 'server':
+        return 'عُطل مؤقت في خوادم بيسكامب.';
+      case 'network':
+        return 'تعذّر الاتصال ببيسكامب.';
+      default:
+        return `خطأ من بيسكامب: ${this.message}`;
+    }
+  }
+}
+
+function kindFor(status: number): BasecampError['kind'] {
+  if (status === 401) return 'unauthorized';
+  if (status === 403) return 'forbidden';
+  if (status === 404) return 'not_found';
+  if (status === 409) return 'conflict';
+  if (status === 422) return 'validation';
+  if (status === 429) return 'rate_limited';
+  if (status >= 500) return 'server';
+  return 'unknown';
+}
+
 // ─────────────────────────── OAuth ───────────────────────────
 
 export function authorizeUrl(state: string): string {
@@ -36,7 +94,13 @@ export async function exchangeCodeForToken(code: string): Promise<TokenResponse>
     headers: { 'User-Agent': env.basecamp.userAgent },
   });
   if (!res.ok) {
-    throw new Error(`Basecamp token exchange failed: ${res.status} ${await res.text()}`);
+    const body = await res.text();
+    throw new BasecampError(
+      `Basecamp token exchange failed: ${res.status}`,
+      res.status,
+      kindFor(res.status),
+      body,
+    );
   }
   return (await res.json()) as TokenResponse;
 }
@@ -54,7 +118,13 @@ export async function refreshAccessToken(refreshToken: string): Promise<TokenRes
     headers: { 'User-Agent': env.basecamp.userAgent },
   });
   if (!res.ok) {
-    throw new Error(`Basecamp refresh failed: ${res.status} ${await res.text()}`);
+    const body = await res.text();
+    throw new BasecampError(
+      `Basecamp refresh failed: ${res.status}`,
+      res.status,
+      kindFor(res.status),
+      body,
+    );
   }
   return (await res.json()) as TokenResponse;
 }
@@ -72,7 +142,13 @@ export async function fetchAuthorization(accessToken: string): Promise<Authoriza
     },
   });
   if (!res.ok) {
-    throw new Error(`Basecamp authorization lookup failed: ${res.status} ${await res.text()}`);
+    const body = await res.text();
+    throw new BasecampError(
+      `Basecamp authorization lookup failed: ${res.status}`,
+      res.status,
+      kindFor(res.status),
+      body,
+    );
   }
   return (await res.json()) as AuthorizationResponse;
 }
@@ -89,6 +165,10 @@ async function ensureFreshToken(session: StoredBasecampSession): Promise<string>
   session.refreshToken = next.refresh_token;
   session.expiresAt = expiresAt;
   return next.access_token;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 export class BasecampClient {
@@ -129,19 +209,54 @@ export class BasecampClient {
       Accept: 'application/json',
     };
     if (body !== undefined) headers['Content-Type'] = 'application/json; charset=utf-8';
-    const res = await fetch(url, {
-      method,
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
-      cache: 'no-store',
-    });
-    if (!res.ok) {
+
+    const MAX_ATTEMPTS = 3;
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      let res: Response;
+      try {
+        res = await fetch(url, {
+          method,
+          headers,
+          body: body === undefined ? undefined : JSON.stringify(body),
+          cache: 'no-store',
+        });
+      } catch (err) {
+        lastError = new BasecampError(
+          err instanceof Error ? err.message : 'network error',
+          0,
+          'network',
+        );
+        if (attempt < MAX_ATTEMPTS) {
+          await sleep(attempt * 400);
+          continue;
+        }
+        throw lastError;
+      }
+
+      if (res.ok) {
+        if (res.status === 204) return undefined as T;
+        const text = await res.text();
+        return text ? (JSON.parse(text) as T) : (undefined as T);
+      }
+
       const text = await res.text();
-      throw new Error(`Basecamp ${method} ${path} → ${res.status}: ${text}`);
+      const err = new BasecampError(
+        `Basecamp ${method} ${path} → ${res.status}`,
+        res.status,
+        kindFor(res.status),
+        text,
+      );
+
+      // Retry only on 429 and 5xx
+      if ((err.kind === 'rate_limited' || err.kind === 'server') && attempt < MAX_ATTEMPTS) {
+        const retryAfter = Number(res.headers.get('retry-after')) || attempt * 800;
+        await sleep(retryAfter * (err.kind === 'rate_limited' ? 1000 : 1));
+        continue;
+      }
+      throw err;
     }
-    if (res.status === 204) return undefined as T;
-    const text = await res.text();
-    return text ? (JSON.parse(text) as T) : (undefined as T);
+    throw lastError ?? new BasecampError('unknown error', 0, 'unknown');
   }
 
   // Projects
@@ -153,6 +268,9 @@ export class BasecampClient {
   }
   createProject(name: string, description?: string) {
     return this.request<any>('POST', '/projects.json', { name, description });
+  }
+  trashProject(projectId: number) {
+    return this.request<void>('DELETE', `/projects/${projectId}.json`);
   }
 
   // People
@@ -191,6 +309,9 @@ export class BasecampClient {
     const q = status === 'completed' ? '?completed=true' : '';
     return this.request<any[]>('GET', `/buckets/${projectId}/todolists/${todoListId}/todos.json${q}`);
   }
+  getTodo(projectId: number, todoId: number) {
+    return this.request<any>('GET', `/buckets/${projectId}/todos/${todoId}.json`);
+  }
   createTodo(
     projectId: number,
     todoListId: number,
@@ -210,6 +331,9 @@ export class BasecampClient {
   }
   updateTodo(projectId: number, todoId: number, patch: Record<string, unknown>) {
     return this.request<any>('PUT', `/buckets/${projectId}/todos/${todoId}.json`, patch);
+  }
+  trashTodo(projectId: number, todoId: number) {
+    return this.request<void>('DELETE', `/buckets/${projectId}/recordings/${todoId}.json`);
   }
 
   // Messages
