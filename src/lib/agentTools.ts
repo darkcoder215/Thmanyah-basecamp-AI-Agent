@@ -2,6 +2,28 @@ import 'server-only';
 import { z } from 'zod';
 import type Anthropic from '@anthropic-ai/sdk';
 import { BasecampClient, BasecampError } from './basecamp';
+import {
+  buildAccountPulse,
+  buildPersonReport,
+  buildProjectReport,
+} from './reports';
+
+// Supported Basecamp recording types for the Recordings API. Kept as a literal
+// tuple so Zod enum + the Claude JSON schema share a single source of truth.
+const RECORDING_TYPES = [
+  'Comment',
+  'Document',
+  'Message',
+  'Question::Answer',
+  'Schedule::Entry',
+  'Todo',
+  'Todolist',
+  'Upload',
+  'Vault',
+] as const;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
 
 // ────────────────────────── Risk model ──────────────────────────
 //
@@ -1166,6 +1188,156 @@ const SPECS: ToolSpec[] = [
       group_by: z.enum(['bucket', 'date']).optional(),
     }),
     run: (i, c) => c.reportTodosAssignedToPerson(i.person_id, i.group_by ?? 'bucket'),
+  },
+
+  // ───────── Deterministic report workflows ─────────
+  //
+  // These four tools replace long `list_* → list_* → list_*` chains with a
+  // single server-side fan-out that calls the Basecamp Recordings API with
+  // `sort=updated_at desc`, paginates until a `since` cutoff, and returns a
+  // compact structured report. Key properties:
+  //   • Freshness: newest items first, native Basecamp sort.
+  //   • Low token cost: one tool_use round-trip instead of 6–12.
+  //   • Resilient: per-type failures are reported inline; the rest succeeds.
+  //   • Capped output: payloads always fit inside MAX_TOOL_OUTPUT_CHARS.
+  //
+  // Prefer these for any "ما الجديد / تقرير / نشاط" question. Fall back to the
+  // low-level list_* tools only when a report can't answer the question.
+  {
+    name: 'project_activity_report',
+    risk: 'readonly',
+    description:
+      'تقرير نشاط حديث لمشروع محدد (Basecamp Recordings API مرتّبة newest-first). يجلب الرسائل، المهام، التعليقات، وبنود الجدول منذ `since_days` (افتراضياً 7 أيام)، ويعيد ملخّصاً + أحدث العناصر + تقدّم المهام. استخدمه مباشرة بدل سلسلة list_todo_lists → list_todos → list_messages لأي سؤال عن "ما الجديد" أو "تقرير المشروع".',
+    effect: (i) =>
+      `سأجمع نشاط المشروع رقم ${i.project_id} في آخر ${i.since_days ?? 7} يوماً عبر أداة واحدة.`,
+    schema: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'integer', description: 'معرّف المشروع في بيسكامب.' },
+        since_days: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 90,
+          description: 'نافذة الفحص بالأيام (افتراضي 7).',
+        },
+        types: {
+          type: 'array',
+          description:
+            'أنواع السجلات التي ترغب بفحصها. الافتراضي: Message, Todo, Comment, Schedule::Entry.',
+          items: { type: 'string', enum: [...RECORDING_TYPES] },
+          maxItems: 8,
+        },
+        include_todo_progress: {
+          type: 'boolean',
+          description: 'جلب تقدّم المهام من todoset (افتراضي true).',
+        },
+      },
+      required: ['project_id'],
+    },
+    validator: z.object({
+      project_id: idSchema,
+      since_days: z.number().int().min(1).max(90).optional(),
+      types: z.array(z.enum(RECORDING_TYPES)).min(1).max(8).optional(),
+      include_todo_progress: z.boolean().optional(),
+    }),
+    run: (i, c) =>
+      buildProjectReport(c, i.project_id, {
+        since: i.since_days ? new Date(Date.now() - i.since_days * DAY_MS) : undefined,
+        types: i.types,
+        includeTodoProgress: i.include_todo_progress,
+      }),
+  },
+  {
+    name: 'fresh_person_report',
+    risk: 'readonly',
+    description:
+      'تقرير نشاط حديث لشخص محدد: ما أنشأه وعلّق عليه في آخر `since_days` (افتراضياً 14)، ملخّص مشروع-مشروع، والمهام المُسندة إليه حالياً. استخدمه إذا سأل المستخدم "ماذا فعل فلان؟" أو "نشاط فلان هذا الأسبوع". اجمعه مع find_person إذا لم يُعطَ المستخدم المعرف.',
+    effect: (i) =>
+      `سأجمع نشاط الشخص رقم ${i.person_id} في آخر ${i.since_days ?? 14} يوماً.`,
+    schema: {
+      type: 'object',
+      properties: {
+        person_id: { type: 'integer' },
+        since_days: { type: 'integer', minimum: 1, maximum: 90 },
+        types: {
+          type: 'array',
+          description:
+            'أنواع السجلات للفلترة على creator.id. الافتراضي: Message, Todo, Comment.',
+          items: { type: 'string', enum: [...RECORDING_TYPES] },
+          maxItems: 6,
+        },
+        include_assignments: {
+          type: 'boolean',
+          description: 'جلب المهام المُسندة حالياً (افتراضي true).',
+        },
+      },
+      required: ['person_id'],
+    },
+    validator: z.object({
+      person_id: idSchema,
+      since_days: z.number().int().min(1).max(90).optional(),
+      types: z.array(z.enum(RECORDING_TYPES)).min(1).max(6).optional(),
+      include_assignments: z.boolean().optional(),
+    }),
+    run: (i, c) =>
+      buildPersonReport(c, i.person_id, {
+        since: i.since_days ? new Date(Date.now() - i.since_days * DAY_MS) : undefined,
+        types: i.types,
+        includeAssignments: i.include_assignments,
+      }),
+  },
+  {
+    name: 'account_pulse',
+    risk: 'readonly',
+    description:
+      'نبض حساب بيسكامب: ما الذي تغيّر على مستوى الحساب كلّه في آخر `since_hours` (افتراضياً 24 ساعة). مجموعاً حسب المشروع وحسب الشخص، مع أبرز العناوين. استخدمه لأسئلة "ما الجديد اليوم؟" أو "ملخص سريع".',
+    effect: (i) =>
+      `سأجمع نبض الحساب في آخر ${i.since_hours ?? 24} ساعة.`,
+    schema: {
+      type: 'object',
+      properties: {
+        since_hours: { type: 'integer', minimum: 1, maximum: 168 },
+        types: {
+          type: 'array',
+          items: { type: 'string', enum: [...RECORDING_TYPES] },
+          maxItems: 6,
+        },
+      },
+    },
+    validator: z.object({
+      since_hours: z.number().int().min(1).max(168).optional(),
+      types: z.array(z.enum(RECORDING_TYPES)).min(1).max(6).optional(),
+    }),
+    run: (i, c) =>
+      buildAccountPulse(c, {
+        since: i.since_hours ? new Date(Date.now() - i.since_hours * HOUR_MS) : undefined,
+        types: i.types,
+      }),
+  },
+  {
+    name: 'project_thread_timeline',
+    risk: 'readonly',
+    description:
+      'الجدول الزمني التفصيلي (Events) لعنصر محدد (رسالة، مهمة، بطاقة، …) داخل مشروع: من فعل ماذا ومتى (created, commented, completed, rescheduled, …). استخدمه للتعمّق في عنصر واحد بعد رؤيته في project_activity_report.',
+    effect: (i) => `سأجلب أحداث العنصر ${i.recording_id} في المشروع ${i.project_id}.`,
+    schema: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'integer' },
+        recording_id: { type: 'integer' },
+        since_days: { type: 'integer', minimum: 1, maximum: 180 },
+      },
+      required: ['project_id', 'recording_id'],
+    },
+    validator: z.object({
+      project_id: idSchema,
+      recording_id: idSchema,
+      since_days: z.number().int().min(1).max(180).optional(),
+    }),
+    run: (i, c) =>
+      c.listEvents(i.project_id, i.recording_id, {
+        since: i.since_days ? new Date(Date.now() - i.since_days * DAY_MS) : undefined,
+      }),
   },
 ];
 

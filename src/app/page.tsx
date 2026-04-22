@@ -58,7 +58,7 @@ export default async function HomePage({
           وكيل ثمانية الذكي
         </p>
         <h1 className="font-display text-5xl font-medium leading-tight text-[var(--fg)] md:text-7xl">
-          مَجال
+          عفريت شركة ثمانية
           <span className="mx-3 text-[var(--accent)]">·</span>
           <span className="text-[var(--fg-muted)]">إدارة بيسكامب بالعربية</span>
         </h1>
@@ -74,7 +74,7 @@ export default async function HomePage({
               href="/chat"
               className="group inline-flex items-center gap-3 rounded-full bg-[var(--accent)] px-8 py-4 text-base font-medium text-[var(--accent-fg)] transition hover:bg-[var(--accent-hover)]"
             >
-              افتح مَجال
+              افتح العفريت
               <span className="diamond transition group-hover:rotate-[135deg]" />
             </Link>
           ) : (

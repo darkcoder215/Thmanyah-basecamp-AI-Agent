@@ -655,7 +655,7 @@ export function ChatWorkspace({
               placeholder={
                 attachment
                   ? 'صِف ما تريد عمله بالبيانات المرفقة (مثال: «أنشئ مهاماً من الأعمدة وأسندها بحسب عمود المسؤول»)…'
-                  : 'اكتب طلبك لمَجال… (استخدم @ لإدراج إشارة محفوظة)'
+                  : 'اكتب طلبك للعفريت… (استخدم @ لإدراج إشارة محفوظة)'
               }
               dir="rtl"
               rows={2}
@@ -704,7 +704,7 @@ export function ChatWorkspace({
           ) : null}
           {bookmarks.length === 0 ? (
             <p className="text-xs leading-loose text-[var(--fg-subtle)]">
-              احفظ أي إجابة مهمة من مَجال بالضغط على «احفظ» فوق الرد. لاستدعاء إشارة محفوظة داخل رسالتك اكتب @ في صندوق الدردشة، أو اضغط «إدراج» هنا.
+              احفظ أي إجابة مهمة من العفريت بالضغط على «احفظ» فوق الرد. لاستدعاء إشارة محفوظة داخل رسالتك اكتب @ في صندوق الدردشة، أو اضغط «إدراج» هنا.
             </p>
           ) : (
             <ul className="space-y-2 text-sm">
@@ -796,7 +796,7 @@ function Bubble({
       >
         {!mine ? (
           <div className="mb-2 flex items-center gap-2 text-xs text-[var(--accent)]">
-            <span className="diamond" /> مَجال
+            <span className="diamond" /> العفريت
             {canBookmark ? (
               <button
                 type="button"
@@ -1263,7 +1263,7 @@ function MentionPopover({
         role="listbox"
       >
         {query
-          ? `لا توجد إشارة محفوظة تطابق «${query}». احفظ رداً من مَجال ثم ارجع إليه هنا.`
+          ? `لا توجد إشارة محفوظة تطابق «${query}». احفظ رداً من العفريت ثم ارجع إليه هنا.`
           : 'لا توجد إشارات محفوظة بعد. اضغط «احفظ» فوق أي رد لإضافته.'}
       </div>
     );
@@ -1321,7 +1321,7 @@ function Thinking() {
     <div className="flex justify-end">
       <div className="inline-flex items-center gap-2 rounded-2xl border border-[var(--accent)]/30 bg-[var(--accent)]/10 px-4 py-3 text-sm text-[var(--fg-muted)]">
         <span className="diamond animate-pulse text-[var(--accent)]" />
-        يفكّر مَجال…
+        يفكّر العفريت…
       </div>
     </div>
   );
@@ -1349,7 +1349,7 @@ function Welcome({
     <div className="flex h-full flex-col items-center justify-center py-10 text-center">
       <span className="diamond mb-6 text-3xl text-[var(--accent)]" />
       <h2 className="font-display text-3xl text-[var(--fg)]">
-        أهلاً بك في <span className="text-[var(--accent)]">مَجال</span>
+        أهلاً بك في <span className="text-[var(--accent)]">عفريت ثمانية</span>
       </h2>
       <p className="mt-3 max-w-md leading-loose text-[var(--fg-muted)]">
         متصل بحساب «{accountName}». اطلب أي شيء من بيسكامب بلغتك الطبيعية. قبل أي تغيير،

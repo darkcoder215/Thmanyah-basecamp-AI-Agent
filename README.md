@@ -1,6 +1,6 @@
-# مَجال · وكيل ثمانية لبيسكامب
+# عفريت شركة ثمانية · وكيل بيسكامب
 
-**Majal** is a Thmanyah-branded, Arabic-first Agentic AI for Basecamp 4. Users connect their
+**عفريت شركة ثمانية** is a Thmanyah-branded, Arabic-first Agentic AI for Basecamp 4. Users connect their
 Basecamp account once via server-side OAuth, then drive their projects in natural Arabic —
 listing projects, creating todos, inviting people, posting messages, commenting, and chatting
 in Campfires — all gated behind a server-enforced preview/confirm flow for any action that

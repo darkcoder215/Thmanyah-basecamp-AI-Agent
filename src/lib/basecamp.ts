@@ -171,6 +171,106 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/**
+ * Parse the `rel="next"` target out of an RFC-5988 `Link` header.
+ *
+ * Basecamp's response looks like:
+ *   Link: <https://3.basecampapi.com/…/projects/recordings.json?page=2>; rel="next"
+ * Multiple links may appear comma-separated. We only care about `next`.
+ *
+ * Returns `null` for missing header, malformed entries, or no next link.
+ * Defensive against quoted/unquoted rel values and extra spaces.
+ */
+function parseNextLink(header: string | null): string | null {
+  if (!header) return null;
+  // Split on commas that sit outside angle brackets — some values embed commas
+  // inside the URL query string. We do a simple state split instead of regex.
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < header.length; i++) {
+    const ch = header[i];
+    if (ch === '<') depth += 1;
+    else if (ch === '>') depth -= 1;
+    else if (ch === ',' && depth === 0) {
+      parts.push(header.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(header.slice(start));
+  for (const raw of parts) {
+    const part = raw.trim();
+    const m = part.match(/^<([^>]+)>\s*;\s*(.*)$/);
+    if (!m) continue;
+    const url = m[1];
+    const params = m[2];
+    // Attribute parsing: rel may be quoted or unquoted per RFC.
+    const relMatch = params.match(/\brel\s*=\s*"?([^";\s]+)"?/i);
+    if (relMatch && relMatch[1].toLowerCase() === 'next') {
+      return url;
+    }
+  }
+  return null;
+}
+
+/**
+ * Basecamp 3 "recording" envelope — the shared shape returned by the
+ * Recordings API (`/projects/recordings.json`). All activity items (messages,
+ * todos, comments, uploads, schedule entries, …) round-trip through this
+ * wrapper, so report builders can treat them uniformly.
+ *
+ * Fields marked optional are present on most — but not all — recording types;
+ * e.g. `comments_count` is undefined on things that can't be commented on.
+ */
+export type BcRecordingType =
+  | 'Comment'
+  | 'Document'
+  | 'Message'
+  | 'Question::Answer'
+  | 'Schedule::Entry'
+  | 'Todo'
+  | 'Todolist'
+  | 'Upload'
+  | 'Vault';
+
+export type Recording = {
+  id: number;
+  type: string;
+  status?: string;
+  visible_to_clients?: boolean;
+  created_at: string;
+  updated_at: string;
+  title?: string;
+  inherits_status?: boolean;
+  url?: string;
+  app_url?: string;
+  bookmark_url?: string;
+  subscription_url?: string;
+  comments_count?: number;
+  comments_url?: string;
+  position?: number;
+  parent?: { id: number; title?: string; type?: string; url?: string; app_url?: string };
+  bucket?: { id: number; name?: string; type?: string };
+  creator?: {
+    id: number;
+    name?: string;
+    email_address?: string;
+    title?: string;
+    avatar_url?: string;
+  };
+  excerpt?: string;
+  content?: string;
+};
+
+export type BcEvent = {
+  id: number;
+  recording_id?: number;
+  action: string;
+  details?: Record<string, unknown>;
+  created_at: string;
+  creator?: { id: number; name?: string; email_address?: string };
+};
+
 export class BasecampClient {
   constructor(private readonly session: StoredBasecampSession) {}
 
@@ -199,6 +299,21 @@ export class BasecampClient {
     path: string,
     body?: unknown,
   ): Promise<T> {
+    const res = await this.requestWithHeaders<T>(method, path, body);
+    return res.body;
+  }
+
+  /**
+   * Lower-level version of `request` that also exposes response headers and
+   * status. Used by `paginatedRequest` to read the RFC-5988 `Link` header for
+   * Basecamp's geared pagination, and by anything that needs `X-Total-Count`
+   * or conditional-request headers later on.
+   */
+  private async requestWithHeaders<T>(
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+    path: string,
+    body?: unknown,
+  ): Promise<{ body: T; headers: Headers; status: number }> {
     const token = await ensureFreshToken(this.session);
     const url = path.startsWith('http')
       ? path
@@ -244,9 +359,12 @@ export class BasecampClient {
       }
 
       if (res.ok) {
-        if (res.status === 204) return undefined as T;
+        if (res.status === 204) {
+          return { body: undefined as T, headers: res.headers, status: res.status };
+        }
         const text = await res.text();
-        return text ? (JSON.parse(text) as T) : (undefined as T);
+        const parsed = text ? (JSON.parse(text) as T) : (undefined as T);
+        return { body: parsed, headers: res.headers, status: res.status };
       }
 
       const text = await res.text();
@@ -266,6 +384,74 @@ export class BasecampClient {
       throw err;
     }
     throw lastError ?? new BasecampError('unknown error', 0, 'unknown');
+  }
+
+  /**
+   * Walk an endpoint that returns a list with RFC-5988 Link-header pagination.
+   *
+   * Basecamp 3 pages are "geared": ~15 rows on page 1, climbing toward 100 on
+   * later pages — the server picks, there is no client `per_page`. We follow
+   * `Link: <…>; rel="next"` blindly and stop when any of these happen:
+   *   • no next link remains on the current page (walk completed cleanly)
+   *   • `opts.until(row)` returns true for some row (caller-supplied cutoff —
+   *     e.g. `row.updated_at < since_date`; we stop BEFORE that row and do
+   *     not include it in the output)
+   *   • `opts.maxPages` pages have been fetched (safety cap; logged as such)
+   *
+   * Errors mid-walk are thrown — reports decide whether to treat partial data
+   * as acceptable. The server already retries 429/5xx inside `requestWithHeaders`.
+   */
+  private async paginatedRequest<T>(
+    path: string,
+    opts: { until?: (row: T) => boolean; maxPages?: number; label?: string } = {},
+  ): Promise<T[]> {
+    const maxPages = Math.max(1, opts.maxPages ?? 20);
+    const label = opts.label ?? `paginated ${path.split('?')[0]}`;
+    const started = Date.now();
+    const out: T[] = [];
+    let nextPath: string | null = path;
+    let page = 0;
+    let totalCount: string | null = null;
+    let stop: 'done' | 'cutoff' | 'max_pages' | 'empty' = 'done';
+
+    while (nextPath && page < maxPages) {
+      page += 1;
+      const { body, headers } = await this.requestWithHeaders<T[]>('GET', nextPath);
+      if (page === 1) totalCount = headers.get('x-total-count');
+      const rows = Array.isArray(body) ? body : [];
+      if (rows.length === 0) {
+        stop = 'empty';
+        break;
+      }
+      let cutoff = false;
+      for (const row of rows) {
+        if (opts.until?.(row)) {
+          cutoff = true;
+          break;
+        }
+        out.push(row);
+      }
+      if (cutoff) {
+        stop = 'cutoff';
+        break;
+      }
+      const link = headers.get('link');
+      const next = parseNextLink(link);
+      if (!next) break;
+      nextPath = next;
+    }
+    if (nextPath && page >= maxPages && stop === 'done') stop = 'max_pages';
+
+    const dur = Date.now() - started;
+    console.info(
+      `[basecamp.paginated] label=${label} pages=${page} rows=${out.length} total_count=${totalCount ?? '?'} stop=${stop} dur_ms=${dur}`,
+    );
+    if (stop === 'max_pages') {
+      console.warn(
+        `[basecamp.paginated] label=${label} hit max_pages=${maxPages} — results may be incomplete`,
+      );
+    }
+    return out;
   }
 
   // Projects
@@ -582,6 +768,111 @@ export class BasecampClient {
       'GET',
       `/reports/todos/assigned/${personId}.json?group_by=${groupBy}`,
     );
+  }
+
+  // ─────── Freshness primitives (Recordings + Events) ───────
+  //
+  // These are the deterministic building blocks for the report workflows in
+  // `src/lib/reports.ts`. They hit native Basecamp endpoints that support
+  // server-side sort + pagination, so the agent doesn't have to reassemble
+  // "what's new in project X" from half-sorted list calls.
+
+  /**
+   * List recordings across the account, optionally filtered to one or more
+   * projects (`bucket`) and one recording `type`. Default sort is
+   * `updated_at desc`, so paginating with a `since` cutoff yields newest-first
+   * activity until the cutoff is crossed.
+   *
+   * Edge cases:
+   * - Empty `bucket` list is the same as omitting it (account-wide).
+   * - `since` in the future returns an empty list (cutoff hits row 1).
+   * - `maxPages` caps runaway walks; default 20 pages is ~300–2000 rows
+   *   depending on Basecamp's geared page size for the query.
+   */
+  async listRecordings(params: {
+    type: BcRecordingType;
+    bucket?: number | number[];
+    status?: 'active' | 'archived' | 'trashed';
+    sort?: 'created_at' | 'updated_at';
+    direction?: 'asc' | 'desc';
+    since?: Date;
+    maxPages?: number;
+  }): Promise<Recording[]> {
+    const qs = new URLSearchParams();
+    qs.set('type', params.type);
+    if (params.bucket !== undefined) {
+      const list = Array.isArray(params.bucket) ? params.bucket : [params.bucket];
+      if (list.length > 0) qs.set('bucket', list.join(','));
+    }
+    if (params.status) qs.set('status', params.status);
+    qs.set('sort', params.sort ?? 'updated_at');
+    qs.set('direction', params.direction ?? 'desc');
+
+    const cutoff = params.since?.getTime();
+    const sortField = params.sort ?? 'updated_at';
+    const direction = params.direction ?? 'desc';
+    // `until` only makes sense for the common "newest-first, stop when we
+    // pass the cutoff" case. For ascending order we'd reject rows on the way
+    // up, which is not useful — skip the optimization then.
+    const until =
+      cutoff !== undefined && direction === 'desc'
+        ? (row: Recording) => {
+            const raw = sortField === 'created_at' ? row.created_at : row.updated_at;
+            if (!raw) return false;
+            const t = Date.parse(raw);
+            return Number.isFinite(t) && t < cutoff;
+          }
+        : undefined;
+
+    return this.paginatedRequest<Recording>(`/projects/recordings.json?${qs.toString()}`, {
+      until,
+      maxPages: params.maxPages,
+      label: `recordings.${params.type}${params.bucket !== undefined ? `.bucket=${Array.isArray(params.bucket) ? params.bucket.join('+') : params.bucket}` : ''}`,
+    });
+  }
+
+  /**
+   * Event-level timeline for a single recording (message, todo, card, etc.).
+   * Returns `created`, `commented`, `completed`, `rescheduled`, etc. — one row
+   * per action, newest-first.
+   */
+  async listEvents(
+    projectId: number,
+    recordingId: number,
+    opts: { since?: Date; maxPages?: number } = {},
+  ): Promise<BcEvent[]> {
+    const cutoff = opts.since?.getTime();
+    const until =
+      cutoff !== undefined
+        ? (row: BcEvent) => {
+            const t = Date.parse(row.created_at);
+            return Number.isFinite(t) && t < cutoff;
+          }
+        : undefined;
+    return this.paginatedRequest<BcEvent>(
+      `/buckets/${projectId}/recordings/${recordingId}/events.json`,
+      { until, maxPages: opts.maxPages ?? 5, label: `events.${recordingId}` },
+    );
+  }
+
+  /**
+   * Messages on a board, walked newest-first and stopped at a cutoff. Uses
+   * the Recordings API under the hood (filtered to `Message` + bucket) rather
+   * than `/messages.json`, because the latter does not accept `sort=updated_at`
+   * reliably across Basecamp accounts.
+   */
+  async listMessagesSorted(
+    projectId: number,
+    opts: { since?: Date; maxPages?: number } = {},
+  ): Promise<Recording[]> {
+    return this.listRecordings({
+      type: 'Message',
+      bucket: projectId,
+      sort: 'updated_at',
+      direction: 'desc',
+      since: opts.since,
+      maxPages: opts.maxPages ?? 10,
+    });
   }
 }
 

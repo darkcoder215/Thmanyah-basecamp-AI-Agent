@@ -23,7 +23,7 @@ export default async function ConnectPage() {
         <p className="mb-4 text-sm uppercase tracking-[0.3em] text-[var(--fg-subtle)]">خطوة واحدة</p>
         <h1 className="font-display text-4xl leading-tight">اربط حسابك في بيسكامب</h1>
         <p className="mt-5 leading-loose text-[var(--fg-muted)]">
-          سنفتح نافذة تسجيل الدخول الرسمية الخاصة ببيسكامب. بعد موافقتك، تعود إلى مَجال
+          سنفتح نافذة تسجيل الدخول الرسمية الخاصة ببيسكامب. بعد موافقتك، تعود إلى العفريت
           جاهزاً للعمل. يمكنك قطع الربط متى شئت.
         </p>
 
