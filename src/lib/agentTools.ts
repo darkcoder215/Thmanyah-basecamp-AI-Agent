@@ -56,7 +56,76 @@ export type ToolSpec = {
 const idSchema = z.number().int().positive();
 const htmlContent = z.string().min(1).max(50_000);
 
+// Plan step statuses, shared between the Zod validator and the JSON schema.
+const PLAN_STATUSES = ['pending', 'in_progress', 'done', 'failed'] as const;
+
 const SPECS: ToolSpec[] = [
+  // ───────── Planning / orchestration (meta-tool) ─────────
+  //
+  // `manage_plan` does NOT touch Basecamp. It is a server-recognized scratchpad
+  // the agent uses to declare and update an ordered checklist while it works a
+  // multi-step or batch request. The route lifts the latest plan out of the
+  // tool result and ships it to the UI as a live "execution plan" card, and the
+  // model sees its own plan echoed back so it can track progress across turns.
+  // Keeping the plan as a real tool (rather than free-text) makes multi-step
+  // flows transparent, resumable, and verifiable.
+  {
+    name: 'manage_plan',
+    risk: 'readonly',
+    description:
+      'أنشئ أو حدّث خطة تنفيذ مرئية للمستخدم (قائمة خطوات مرقّمة بحالات). استخدمها لأي طلب يتطلّب أكثر من إجراءين أو أي تنفيذ جماعي (batch/CSV): ابدأ بوضع الخطوات بحالة pending، ثم حدّث كل خطوة إلى in_progress قبل تنفيذها وإلى done/failed بعدها. لا تستخدمها للطلبات البسيطة المكوّنة من خطوة واحدة. لا تُجري أي تغيير في بيسكامب — هي لوحة تتبّع فقط.',
+    effect: (i) => `سأحدّث خطة التنفيذ (${(i?.steps?.length ?? 0)} خطوة).`,
+    schema: {
+      type: 'object',
+      properties: {
+        steps: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 30,
+          description: 'قائمة الخطوات بالترتيب. مرّر القائمة كاملة في كل تحديث.',
+          items: {
+            type: 'object',
+            properties: {
+              title: { type: 'string', minLength: 1, maxLength: 300 },
+              status: { type: 'string', enum: [...PLAN_STATUSES] },
+              note: {
+                type: 'string',
+                maxLength: 500,
+                description: 'اختياري: ملاحظة قصيرة (مثلاً سبب الفشل أو نتيجة الخطوة).',
+              },
+            },
+            required: ['title', 'status'],
+          },
+        },
+      },
+      required: ['steps'],
+    },
+    validator: z.object({
+      steps: z
+        .array(
+          z.object({
+            title: z.string().min(1).max(300),
+            status: z.enum(PLAN_STATUSES),
+            note: z.string().max(500).optional(),
+          }),
+        )
+        .min(1)
+        .max(30),
+    }),
+    run: async (i: any) => {
+      const steps = i.steps as Array<{ status: string }>;
+      const done = steps.filter((s) => s.status === 'done').length;
+      const failed = steps.filter((s) => s.status === 'failed').length;
+      return {
+        ok: true,
+        steps: i.steps,
+        progress: { done, failed, total: steps.length },
+        instruction:
+          'الخطة محفوظة ومعروضة للمستخدم. نفّذ الخطوات بالترتيب، وحدّث حالاتها عبر manage_plan كلما تقدّمت. عند انتهاء الخطة قدّم للمستخدم تحقّقاً ختامياً: ما تمّ وما فشل ولماذا.',
+      };
+    },
+  },
+
   // ───────── Projects ─────────
   {
     name: 'list_projects',
@@ -1353,6 +1422,13 @@ function withConfirmed(schema: Record<string, any>, risk: Risk): Record<string, 
   };
   return { ...schema, properties };
 }
+
+/** A single step in the agent's visible execution plan (see `manage_plan`). */
+export type PlanStep = {
+  title: string;
+  status: (typeof PLAN_STATUSES)[number];
+  note?: string;
+};
 
 export const TOOL_SPECS = SPECS;
 

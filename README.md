@@ -388,6 +388,11 @@ URI matching `BASECAMP_REDIRECT_URI`.
 
 ## Agent tools
 
+**Orchestration:** `manage_plan` — a meta-tool (no Basecamp call) the agent uses to declare and
+update a visible execution checklist while it works any multi-step or batch request. The latest
+plan is rendered in the chat as a live "خطة التنفيذ" card, and the agent updates each step's
+status (`pending` → `in_progress` → `done`/`failed`) and gives a final verification summary.
+
 `list_projects`, `get_project`, `create_project`, `trash_project`, `list_people_in_account`,
 `list_people_in_project`, `grant_people_to_project`, `revoke_people_from_project`,
 `list_todo_lists`, `create_todo_list`, `list_todos`, `get_todo`, `create_todo`,

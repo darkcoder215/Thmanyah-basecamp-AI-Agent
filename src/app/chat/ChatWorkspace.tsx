@@ -14,6 +14,12 @@ type ToolEvent = {
   output?: string;
 };
 
+type PlanStep = {
+  title: string;
+  status: 'pending' | 'in_progress' | 'done' | 'failed';
+  note?: string;
+};
+
 type Turn =
   | {
       role: 'user' | 'assistant';
@@ -21,6 +27,7 @@ type Turn =
       at?: string;
       tools?: ToolEvent[];
       steps?: string[];
+      plan?: PlanStep[];
     }
   | { role: 'system'; text: string };
 
@@ -444,6 +451,7 @@ export function ChatWorkspace({
             text: data.reply ?? '',
             tools: data.tools ?? [],
             steps: data.steps ?? [],
+            plan: Array.isArray(data.plan) ? data.plan : undefined,
           },
         ]);
         const preview = (data.tools as ToolEvent[] | undefined)?.find((t) => t.kind === 'preview');
@@ -782,6 +790,7 @@ function Bubble({
   const mine = turn.role === 'user';
   const tools = 'tools' in turn ? turn.tools ?? [] : [];
   const steps = 'steps' in turn ? turn.steps ?? [] : [];
+  const plan = 'plan' in turn ? turn.plan ?? [] : [];
   const hasTrace = !mine && (tools.length > 0 || steps.length > 0);
   const canBookmark = !mine && !!turn.text && !!onBookmark;
 
@@ -821,6 +830,7 @@ function Bubble({
           <span className="text-[var(--fg-subtle)]">…</span>
         )}
       </div>
+      {!mine && plan.length > 0 ? <PlanCard steps={plan} /> : null}
       {!mine && tools.length > 0 ? (
         <div className="mt-2 flex max-w-[85%] flex-wrap justify-end gap-2">
           {tools.map((t, i) => (
@@ -829,6 +839,60 @@ function Bubble({
         </div>
       ) : null}
       {hasTrace ? <StepsPanel tools={tools} steps={steps} /> : null}
+    </div>
+  );
+}
+
+const PLAN_STATUS_META: Record<
+  PlanStep['status'],
+  { icon: string; label: string; color: string }
+> = {
+  done: { icon: '✓', label: 'منجزة', color: 'text-[var(--accent)]' },
+  in_progress: { icon: '◐', label: 'جارية', color: 'text-[#E79547]' },
+  failed: { icon: '✕', label: 'فشلت', color: 'text-[var(--danger)]' },
+  pending: { icon: '○', label: 'بانتظار', color: 'text-[var(--fg-subtle)]' },
+};
+
+function PlanCard({ steps }: { steps: PlanStep[] }) {
+  const done = steps.filter((s) => s.status === 'done').length;
+  const failed = steps.filter((s) => s.status === 'failed').length;
+  return (
+    <div className="mt-2 w-full max-w-[85%] rounded-xl border border-[var(--accent)]/30 bg-[var(--surface)]/50 text-sm">
+      <div className="flex items-center gap-2 border-b border-[var(--border)] px-4 py-2 text-xs text-[var(--fg-muted)]">
+        <span className="diamond text-[var(--accent)]" />
+        خطة التنفيذ
+        <span className="mr-auto text-[var(--fg-subtle)]">
+          {done}/{steps.length} منجزة{failed ? ` · ${failed} فشلت` : ''}
+        </span>
+      </div>
+      <ol className="space-y-1 px-4 py-3">
+        {steps.map((s, i) => {
+          const meta = PLAN_STATUS_META[s.status] ?? PLAN_STATUS_META.pending;
+          return (
+            <li key={i} className="flex items-start gap-2 leading-relaxed">
+              <span className={`mt-0.5 shrink-0 ${meta.color}`} aria-hidden>
+                {meta.icon}
+              </span>
+              <span className="text-[var(--fg-subtle)]">{i + 1}.</span>
+              <span className="flex-1">
+                <span
+                  className={
+                    s.status === 'done'
+                      ? 'text-[var(--fg-muted)] line-through'
+                      : 'text-[var(--fg)]'
+                  }
+                >
+                  {s.title}
+                </span>
+                {s.note ? (
+                  <span className="block text-xs text-[var(--fg-subtle)]">{s.note}</span>
+                ) : null}
+              </span>
+              <span className={`shrink-0 text-[11px] ${meta.color}`}>{meta.label}</span>
+            </li>
+          );
+        })}
+      </ol>
     </div>
   );
 }

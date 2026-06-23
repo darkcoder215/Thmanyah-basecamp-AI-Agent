@@ -4,7 +4,7 @@ import { BasecampClient } from '@/lib/basecamp';
 import { env } from '@/lib/env';
 import { readSessionId } from '@/lib/session';
 import { appendAgentMessage, loadAgentHistory } from '@/lib/vault';
-import { AGENT_TOOLS, dispatchTool, findSpec } from '@/lib/agentTools';
+import { AGENT_TOOLS, dispatchTool, findSpec, type PlanStep } from '@/lib/agentTools';
 import { clearAgentHistory, loadWindowedHistory } from '@/lib/memory';
 import { assertSameOrigin } from '@/lib/csrf';
 import { rateLimit } from '@/lib/rateLimit';
@@ -80,6 +80,13 @@ const SYSTEM_PROMPT = `أنت "عفريت شركة ثمانية"، وكيل ثم
 - لعناصر أقل من ثلاثة أو ملاحظات قصيرة: استخدم قائمة نقطية بسيطة.
 - استخدم النص الغامق للتأكيد و inline code للمعرفات (IDs) والمسارات.
 - لا تضع روابط مطلقة (https://…) إلا إذا طلبها المستخدم صراحة.
+
+# خطة التنفيذ (Planning) — بالغة الأهمية للمهام المركّبة
+- لأي طلب يتطلّب أكثر من إجراءين، أو أي تنفيذ جماعي (batch)، أو معالجة ملف CSV، أو تقرير متعدّد المصادر: ابدأ باستدعاء **manage_plan** لوضع خطة مرقّمة واضحة (كل خطوة بعنوان وحالة pending). هذه الخطة تُعرض للمستخدم مباشرةً كبطاقة «خطة التنفيذ».
+- يمكنك إصدار manage_plan في نفس الدورة مع أدوات أخرى (parallel tool_use) لتوفير الدورات.
+- حدّث حالة كل خطوة إلى in_progress قبل تنفيذها، ثم إلى done بعد نجاحها، أو failed مع note يوضّح السبب. مرّر دائماً قائمة الخطوات كاملة في كل تحديث.
+- لا تستخدم manage_plan للطلبات البسيطة المكوّنة من خطوة واحدة (مثل «اعرض مشاريعي»).
+- بعد إكمال الخطة، قدّم تحقّقاً ختامياً صريحاً: ما تمّ، وما فشل ولماذا، مع اقتراح لإعادة المحاولة للفاشل فقط.
 
 # اقتراحات ذكية
 - بعد كل خطوة، اقترح على المستخدم خطوة منطقية تالية.`;
@@ -207,6 +214,10 @@ async function handlePost(req: NextRequest) {
 
   const toolEvents: PublicToolEvent[] = [];
   const steps: string[] = [];
+  // The agent's latest execution plan (from the `manage_plan` meta-tool). It is
+  // overwritten each time the agent updates the plan, so the response carries the
+  // most recent snapshot for the UI to render as a live checklist.
+  let latestPlan: PlanStep[] | null = null;
   let finalText = '';
   let stoppedEarly: string | null = null;
 
@@ -292,6 +303,25 @@ async function handlePost(req: NextRequest) {
       const risk = spec?.risk ?? 'readonly';
       const result = await dispatchTool(tu.name, tu.input, basecamp);
 
+      // `manage_plan` is a meta-tool: it never touches Basecamp. Lift the latest
+      // plan into `latestPlan` for the UI, return the result to the model so it
+      // can track progress, but skip the tool badge/trace and audit entry — it's
+      // an internal scratchpad, not a Basecamp action.
+      if (tu.name === 'manage_plan') {
+        if (result.kind === 'ok') {
+          const out = result.output as { steps?: PlanStep[] } | undefined;
+          if (out && Array.isArray(out.steps)) latestPlan = out.steps;
+        }
+        const { text, isError } = stringifyResultForModel(result, tu.name);
+        toolResultBlocks.push({
+          type: 'tool_result',
+          tool_use_id: tu.id,
+          content: text,
+          is_error: isError,
+        });
+        continue;
+      }
+
       // Strip the `confirmed` boolean before shipping tool input to the client
       // — it's an internal safety flag, not meaningful to a human reader.
       const sanitizedInput =
@@ -360,6 +390,7 @@ async function handlePost(req: NextRequest) {
         'انتهت صلاحية الربط مع بيسكامب أثناء التنفيذ. يرجى إعادة الربط من صفحة الاتصال.',
       tools: toolEvents,
       steps,
+      plan: latestPlan,
       reconnect: true,
     });
   }
@@ -374,6 +405,7 @@ async function handlePost(req: NextRequest) {
     reply: finalText || 'تم.',
     tools: toolEvents,
     steps,
+    plan: latestPlan,
     turn_limit_hit: stoppedEarly === 'max_turns',
   });
 }
