@@ -5,6 +5,21 @@ import { loadSession, saveSession, updateTokens, type StoredBasecampSession } fr
 const LAUNCHPAD = 'https://launchpad.37signals.com';
 const API_BASE = 'https://3.basecampapi.com';
 
+// Safety cap for exhaustive "pull everything" walks. Basecamp's geared
+// pagination tops out near 100 rows/page, so 1000 pages is ~100k rows — far
+// beyond any realistic single list, while still bounding a runaway loop.
+const PULL_ALL_MAX_PAGES = 1000;
+
+/** Result of walking a paginated endpoint, including whether it was truncated. */
+export type PageWalk<T> = {
+  rows: T[];
+  pages: number;
+  stop: 'done' | 'cutoff' | 'max_pages' | 'empty';
+  totalCount: number | null;
+  /** True when the walk stopped at the safety cap — the result is partial. */
+  incomplete: boolean;
+};
+
 // ─────────────────────────── Typed errors ───────────────────────────
 
 export class BasecampError extends Error {
@@ -172,6 +187,40 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
+ * Run `fn` over `items` with at most `limit` in flight at once, preserving
+ * input order in the result array. Used by the deterministic bulk pulls, where
+ * we fan out across columns/projects but must not hammer Basecamp's rate limit.
+ * Never rejects on a single item — callers pass a `fn` that captures its own
+ * errors so one bad project/column cannot abort the whole sweep.
+ */
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const workers = new Array(Math.max(1, Math.min(limit, items.length || 1)))
+    .fill(0)
+    .map(async () => {
+      while (true) {
+        const i = cursor++;
+        if (i >= items.length) return;
+        results[i] = await fn(items[i], i);
+      }
+    });
+  await Promise.all(workers);
+  return results;
+}
+
+/** Compact, safe-to-surface description of a thrown value (no stack/internal IPs). */
+export function describeError(err: unknown): string {
+  if (err instanceof BasecampError) return err.arabicMessage;
+  if (err instanceof Error) return err.message;
+  return 'خطأ غير معروف';
+}
+
+/**
  * Parse the `rel="next"` target out of an RFC-5988 `Link` header.
  *
  * Basecamp's response looks like:
@@ -181,7 +230,7 @@ function sleep(ms: number): Promise<void> {
  * Returns `null` for missing header, malformed entries, or no next link.
  * Defensive against quoted/unquoted rel values and extra spaces.
  */
-function parseNextLink(header: string | null): string | null {
+export function parseNextLink(header: string | null): string | null {
   if (!header) return null;
   // Split on commas that sit outside angle brackets — some values embed commas
   // inside the URL query string. We do a simple state split instead of regex.
@@ -401,23 +450,27 @@ export class BasecampClient {
    * Errors mid-walk are thrown — reports decide whether to treat partial data
    * as acceptable. The server already retries 429/5xx inside `requestWithHeaders`.
    */
-  private async paginatedRequest<T>(
+  private async walkPages<T>(
     path: string,
     opts: { until?: (row: T) => boolean; maxPages?: number; label?: string } = {},
-  ): Promise<T[]> {
+  ): Promise<PageWalk<T>> {
     const maxPages = Math.max(1, opts.maxPages ?? 20);
     const label = opts.label ?? `paginated ${path.split('?')[0]}`;
     const started = Date.now();
     const out: T[] = [];
     let nextPath: string | null = path;
     let page = 0;
-    let totalCount: string | null = null;
-    let stop: 'done' | 'cutoff' | 'max_pages' | 'empty' = 'done';
+    let totalCount: number | null = null;
+    let stop: PageWalk<T>['stop'] = 'done';
 
     while (nextPath && page < maxPages) {
       page += 1;
       const { body, headers } = await this.requestWithHeaders<T[]>('GET', nextPath);
-      if (page === 1) totalCount = headers.get('x-total-count');
+      if (page === 1) {
+        const raw = headers.get('x-total-count');
+        const n = raw == null ? NaN : Number(raw);
+        totalCount = Number.isFinite(n) ? n : null;
+      }
       const rows = Array.isArray(body) ? body : [];
       if (rows.length === 0) {
         stop = 'empty';
@@ -438,6 +491,9 @@ export class BasecampClient {
       const link = headers.get('link');
       const next = parseNextLink(link);
       if (!next) break;
+      // Guard against a server that points `next` back at a page we just
+      // fetched — would otherwise loop forever until maxPages.
+      if (next === nextPath) break;
       nextPath = next;
     }
     if (nextPath && page >= maxPages && stop === 'done') stop = 'max_pages';
@@ -451,7 +507,27 @@ export class BasecampClient {
         `[basecamp.paginated] label=${label} hit max_pages=${maxPages} — results may be incomplete`,
       );
     }
-    return out;
+    return { rows: out, pages: page, stop, totalCount, incomplete: stop === 'max_pages' };
+  }
+
+  /** Convenience wrapper that returns only the rows (see `walkPages`). */
+  private async paginatedRequest<T>(
+    path: string,
+    opts: { until?: (row: T) => boolean; maxPages?: number; label?: string } = {},
+  ): Promise<T[]> {
+    return (await this.walkPages<T>(path, opts)).rows;
+  }
+
+  /**
+   * Exhaustively walk EVERY page of a Link-paginated list endpoint with no
+   * early cutoff. This is the deterministic "pull everything" primitive: it
+   * keeps following `rel="next"` until the server stops handing out links, and
+   * only gives up at a very high safety cap (1000 pages). The returned walk
+   * carries `incomplete` so callers can tell the user the data was truncated
+   * rather than silently returning a partial set.
+   */
+  private collectAll<T>(path: string, label: string): Promise<PageWalk<T>> {
+    return this.walkPages<T>(path, { maxPages: PULL_ALL_MAX_PAGES, label });
   }
 
   // Projects
@@ -461,7 +537,12 @@ export class BasecampClient {
   // `archived` or `trashed`. Sending `?status=active` returns 400.
   listProjects(status: 'active' | 'archived' | 'trashed' = 'active') {
     const q = status === 'active' ? '' : `?status=${status}`;
-    return this.request<any[]>('GET', `/projects.json${q}`);
+    // Exhaustive: /projects.json is Link-paginated; the old single-page call
+    // silently dropped every project past the first ~15.
+    return this.paginatedRequest<any>(`/projects.json${q}`, {
+      maxPages: PULL_ALL_MAX_PAGES,
+      label: `projects.${status}`,
+    });
   }
   getProject(projectId: number) {
     return this.request<any>('GET', `/projects/${projectId}.json`);
@@ -486,10 +567,16 @@ export class BasecampClient {
   //   GET  /my/preferences.json             → current user's preferences
   //   PUT  /my/preferences.json             → update preferences
   listPeopleInAccount() {
-    return this.request<any[]>('GET', `/people.json`);
+    return this.paginatedRequest<any>(`/people.json`, {
+      maxPages: PULL_ALL_MAX_PAGES,
+      label: 'people.account',
+    });
   }
   listPeopleInProject(projectId: number) {
-    return this.request<any[]>('GET', `/projects/${projectId}/people.json`);
+    return this.paginatedRequest<any>(`/projects/${projectId}/people.json`, {
+      maxPages: PULL_ALL_MAX_PAGES,
+      label: `people.project.${projectId}`,
+    });
   }
   listPingablePeople() {
     return this.request<any[]>('GET', `/circles/people.json`);
@@ -549,7 +636,10 @@ export class BasecampClient {
     return this.request<any>('GET', `/buckets/${projectId}/todosets/${todoSetId}.json`);
   }
   listTodoLists(projectId: number, todoSetId: number) {
-    return this.request<any[]>('GET', `/buckets/${projectId}/todosets/${todoSetId}/todolists.json`);
+    return this.paginatedRequest<any>(
+      `/buckets/${projectId}/todosets/${todoSetId}/todolists.json`,
+      { maxPages: PULL_ALL_MAX_PAGES, label: `todolists.${todoSetId}` },
+    );
   }
   createTodoList(projectId: number, todoSetId: number, name: string, description?: string) {
     return this.request<any>('POST', `/buckets/${projectId}/todosets/${todoSetId}/todolists.json`, {
@@ -561,7 +651,10 @@ export class BasecampClient {
   // Todos
   listTodos(projectId: number, todoListId: number, status: 'active' | 'completed' = 'active') {
     const q = status === 'completed' ? '?completed=true' : '';
-    return this.request<any[]>('GET', `/buckets/${projectId}/todolists/${todoListId}/todos.json${q}`);
+    return this.paginatedRequest<any>(
+      `/buckets/${projectId}/todolists/${todoListId}/todos.json${q}`,
+      { maxPages: PULL_ALL_MAX_PAGES, label: `todos.${todoListId}.${status}` },
+    );
   }
   getTodo(projectId: number, todoId: number) {
     return this.request<any>('GET', `/buckets/${projectId}/todos/${todoId}.json`);
@@ -592,7 +685,10 @@ export class BasecampClient {
 
   // Messages
   listMessages(projectId: number, boardId: number) {
-    return this.request<any[]>('GET', `/buckets/${projectId}/message_boards/${boardId}/messages.json`);
+    return this.paginatedRequest<any>(
+      `/buckets/${projectId}/message_boards/${boardId}/messages.json`,
+      { maxPages: PULL_ALL_MAX_PAGES, label: `messages.${boardId}` },
+    );
   }
   postMessage(projectId: number, boardId: number, subject: string, content: string, status: 'active' | 'draft' = 'active') {
     return this.request<any>('POST', `/buckets/${projectId}/message_boards/${boardId}/messages.json`, {
@@ -604,7 +700,10 @@ export class BasecampClient {
 
   // Comments
   listComments(projectId: number, recordingId: number) {
-    return this.request<any[]>('GET', `/buckets/${projectId}/recordings/${recordingId}/comments.json`);
+    return this.paginatedRequest<any>(
+      `/buckets/${projectId}/recordings/${recordingId}/comments.json`,
+      { maxPages: PULL_ALL_MAX_PAGES, label: `comments.${recordingId}` },
+    );
   }
   postComment(projectId: number, recordingId: number, content: string) {
     return this.request<any>('POST', `/buckets/${projectId}/recordings/${recordingId}/comments.json`, {
@@ -630,9 +729,12 @@ export class BasecampClient {
   getCardTable(projectId: number, cardTableId: number) {
     return this.request<any>('GET', `/buckets/${projectId}/card_tables/${cardTableId}.json`);
   }
-  /** Paginated cards in a given column/list. */
+  /** All cards in a given column/list, walked across every page. */
   listCardsInColumn(projectId: number, columnId: number) {
-    return this.request<any[]>('GET', `/buckets/${projectId}/card_tables/lists/${columnId}/cards.json`);
+    return this.paginatedRequest<any>(
+      `/buckets/${projectId}/card_tables/lists/${columnId}/cards.json`,
+      { maxPages: PULL_ALL_MAX_PAGES, label: `cards.col.${columnId}` },
+    );
   }
   /** A single card, including its steps. */
   getCard(projectId: number, cardId: number) {
@@ -873,6 +975,247 @@ export class BasecampClient {
       since: opts.since,
       maxPages: opts.maxPages ?? 10,
     });
+  }
+
+  // ─────────── Deterministic bulk pulls ("pull EVERYTHING") ───────────
+  //
+  // These methods exhaust pagination and fan out across sub-resources so the
+  // agent gets a complete, deterministic snapshot in a single tool call — no
+  // model-driven looping that quits after a couple of pages. Every aggregate
+  // reports `incomplete` (a paginated walk hit the safety cap) and `errors`
+  // (a sub-resource failed) so partial results are never mistaken for complete.
+
+  /** Every project on the account across the requested statuses, de-duplicated. */
+  async pullAllProjects(
+    statuses: Array<'active' | 'archived' | 'trashed'> = ['active'],
+  ): Promise<{ projects: any[]; incomplete: boolean; errors: Array<{ scope: string; error: string }> }> {
+    const errors: Array<{ scope: string; error: string }> = [];
+    const byId = new Map<number, any>();
+    let incomplete = false;
+    for (const status of statuses) {
+      try {
+        const walk = await this.collectAll<any>(
+          `/projects.json${status === 'active' ? '' : `?status=${status}`}`,
+          `pull.projects.${status}`,
+        );
+        incomplete = incomplete || walk.incomplete;
+        for (const p of walk.rows) if (p && typeof p.id === 'number') byId.set(p.id, p);
+      } catch (err) {
+        errors.push({ scope: `projects.${status}`, error: describeError(err) });
+      }
+    }
+    return { projects: [...byId.values()], incomplete, errors };
+  }
+
+  /**
+   * Every card in a card table, across every column AND the "on hold" /
+   * triage columns the table exposes via its `lists` array. One slow/failed
+   * column is captured in `errors` instead of aborting the whole pull.
+   */
+  async pullAllCardsInTable(
+    projectId: number,
+    cardTableId: number,
+  ): Promise<{
+    cardTableId: number;
+    columns: Array<{ id: number; title: string; cardsCount: number; incomplete: boolean }>;
+    cards: any[];
+    totalCards: number;
+    incomplete: boolean;
+    errors: Array<{ scope: string; error: string }>;
+  }> {
+    const table = await this.getCardTable(projectId, cardTableId);
+    // BC3 calls columns "lists" on the card table payload.
+    const columns: any[] = Array.isArray(table?.lists) ? table.lists : [];
+    const errors: Array<{ scope: string; error: string }> = [];
+
+    const perColumn = await mapWithConcurrency(columns, 4, async (col) => {
+      const id = Number(col?.id);
+      const title = String(col?.title ?? '');
+      if (!Number.isFinite(id)) {
+        errors.push({ scope: `column.${col?.id}`, error: 'معرّف عمود غير صالح' });
+        return { id: 0, title, cards: [] as any[], incomplete: false };
+      }
+      try {
+        const walk = await this.collectAll<any>(
+          `/buckets/${projectId}/card_tables/lists/${id}/cards.json`,
+          `pull.cards.col.${id}`,
+        );
+        return { id, title, cards: walk.rows, incomplete: walk.incomplete };
+      } catch (err) {
+        errors.push({ scope: `column.${id} (${title})`, error: describeError(err) });
+        return { id, title, cards: [] as any[], incomplete: true };
+      }
+    });
+
+    const cards = perColumn.flatMap((c) => c.cards);
+    return {
+      cardTableId,
+      columns: perColumn.map((c) => ({
+        id: c.id,
+        title: c.title,
+        cardsCount: c.cards.length,
+        incomplete: c.incomplete,
+      })),
+      cards,
+      totalCards: cards.length,
+      incomplete: perColumn.some((c) => c.incomplete),
+      errors,
+    };
+  }
+
+  /**
+   * Every project a given person is a member of. Basecamp has no
+   * "projects for person" endpoint, so this is computed deterministically:
+   * pull all projects, then check each project's people list for the person.
+   * Per-project read failures are captured, not fatal.
+   */
+  async pullProjectsForPerson(
+    personId: number,
+    opts: { includeArchived?: boolean } = {},
+  ): Promise<{
+    personId: number;
+    projects: Array<{ id: number; name: string; status: string }>;
+    scanned: number;
+    incomplete: boolean;
+    errors: Array<{ scope: string; error: string }>;
+  }> {
+    const statuses: Array<'active' | 'archived'> = opts.includeArchived
+      ? ['active', 'archived']
+      : ['active'];
+    const all = await this.pullAllProjects(statuses);
+    const errors = [...all.errors];
+
+    const flags = await mapWithConcurrency(all.projects, 5, async (p) => {
+      try {
+        const people = await this.listPeopleInProject(p.id);
+        return Array.isArray(people) && people.some((person) => Number(person?.id) === personId);
+      } catch (err) {
+        errors.push({ scope: `project.${p.id} (${p?.name ?? ''})`, error: describeError(err) });
+        return false;
+      }
+    });
+
+    const projects = all.projects
+      .filter((_p, i) => flags[i])
+      .map((p) => ({ id: p.id, name: String(p.name ?? ''), status: String(p.status ?? 'active') }));
+
+    return {
+      personId,
+      projects,
+      scanned: all.projects.length,
+      // Incomplete if we couldn't enumerate all projects, or any membership
+      // check failed (the person might belong to a project we couldn't read).
+      incomplete: all.incomplete || errors.length > 0,
+      errors,
+    };
+  }
+
+  /**
+   * A complete snapshot of one project: people, every to-do list with all its
+   * to-dos (active + completed), every message, and every card across the
+   * Kanban board. Each section is fetched independently so one failure yields a
+   * partial dump with a recorded error rather than nothing.
+   */
+  async pullProjectEverything(projectId: number): Promise<{
+    project: { id: number; name: string };
+    people: any[];
+    todoLists: Array<{ id: number; name: string; active: any[]; completed: any[] }>;
+    messages: any[];
+    cards: Awaited<ReturnType<BasecampClient['pullAllCardsInTable']>> | null;
+    counts: { people: number; todoLists: number; todos: number; messages: number; cards: number };
+    incomplete: boolean;
+    errors: Array<{ scope: string; error: string }>;
+  }> {
+    const project = await this.getProject(projectId);
+    const dock: any[] = Array.isArray(project?.dock) ? project.dock : [];
+    const tool = (name: string) =>
+      dock.find((d) => d?.name === name && d?.enabled !== false);
+    const errors: Array<{ scope: string; error: string }> = [];
+    let incomplete = false;
+
+    // People
+    let people: any[] = [];
+    try {
+      people = await this.listPeopleInProject(projectId);
+    } catch (err) {
+      errors.push({ scope: 'people', error: describeError(err) });
+      incomplete = true;
+    }
+
+    // To-do lists + their to-dos (active + completed)
+    let todoLists: Array<{ id: number; name: string; active: any[]; completed: any[] }> = [];
+    const todoset = tool('todoset');
+    if (todoset?.id) {
+      try {
+        const lists = await this.listTodoLists(projectId, todoset.id);
+        todoLists = await mapWithConcurrency(lists, 4, async (list: any) => {
+          const id = Number(list?.id);
+          const name = String(list?.name ?? list?.title ?? '');
+          const entry = { id, name, active: [] as any[], completed: [] as any[] };
+          if (!Number.isFinite(id)) return entry;
+          try {
+            entry.active = await this.listTodos(projectId, id, 'active');
+          } catch (err) {
+            errors.push({ scope: `todolist.${id}.active`, error: describeError(err) });
+            incomplete = true;
+          }
+          try {
+            entry.completed = await this.listTodos(projectId, id, 'completed');
+          } catch (err) {
+            errors.push({ scope: `todolist.${id}.completed`, error: describeError(err) });
+            incomplete = true;
+          }
+          return entry;
+        });
+      } catch (err) {
+        errors.push({ scope: 'todolists', error: describeError(err) });
+        incomplete = true;
+      }
+    }
+
+    // Messages
+    let messages: any[] = [];
+    const board = tool('message_board');
+    if (board?.id) {
+      try {
+        messages = await this.listMessages(projectId, board.id);
+      } catch (err) {
+        errors.push({ scope: 'messages', error: describeError(err) });
+        incomplete = true;
+      }
+    }
+
+    // Cards (Kanban)
+    let cards: Awaited<ReturnType<BasecampClient['pullAllCardsInTable']>> | null = null;
+    const kanban = tool('kanban_board');
+    if (kanban?.id) {
+      try {
+        cards = await this.pullAllCardsInTable(projectId, kanban.id);
+        if (cards.incomplete) incomplete = true;
+        for (const e of cards.errors) errors.push({ scope: `cards.${e.scope}`, error: e.error });
+      } catch (err) {
+        errors.push({ scope: 'cards', error: describeError(err) });
+        incomplete = true;
+      }
+    }
+
+    const todoCount = todoLists.reduce((n, l) => n + l.active.length + l.completed.length, 0);
+    return {
+      project: { id: projectId, name: String(project?.name ?? '') },
+      people,
+      todoLists,
+      messages,
+      cards,
+      counts: {
+        people: people.length,
+        todoLists: todoLists.length,
+        todos: todoCount,
+        messages: messages.length,
+        cards: cards?.totalCards ?? 0,
+      },
+      incomplete,
+      errors,
+    };
   }
 }
 

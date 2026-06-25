@@ -38,6 +38,45 @@ const FALLBACK_SUGGESTIONS = [
   'انشر تحديثاً على لوحة رسائل مشروع «موسم 4»',
 ];
 
+// One-click deterministic pulls. Each sends a crafted prompt that maps cleanly
+// to a single `pull_*` tool (exhaustive, single-call). ID-requiring pulls ask
+// the agent to surface the choices first, so the button works with zero typing.
+const QUICK_PULLS: Array<{ label: string; icon: string; prompt: string; hint: string }> = [
+  {
+    label: 'كل المشاريع',
+    icon: '◳',
+    hint: 'يسحب جميع مشاريع الحساب عبر كل الصفحات',
+    prompt: 'اسحب كل مشاريع الحساب بالكامل (نشطة) واعرضها في جدول مع عددها الإجمالي.',
+  },
+  {
+    label: 'كل الأشخاص',
+    icon: '⚇',
+    hint: 'يسحب جميع الأشخاص على الحساب',
+    prompt: 'اسحب كل الأشخاص في الحساب بالكامل واعرضهم في جدول (الاسم، البريد، المسمّى).',
+  },
+  {
+    label: 'كل بطاقات مشروع',
+    icon: '▤',
+    hint: 'يسحب كل بطاقات كانبان لمشروع عبر كل الأعمدة',
+    prompt:
+      'أريد سحب كل بطاقات لوحة كانبان لمشروع بالكامل. اعرض مشاريعي أولاً لأختار المشروع، ثم نفّذ السحب الشامل للبطاقات.',
+  },
+  {
+    label: 'مشاريع شخص',
+    icon: '⌖',
+    hint: 'كل المشاريع التي يشارك فيها شخص معيّن',
+    prompt:
+      'أريد كل المشاريع التي يشارك فيها شخص معيّن. اسألني عن اسم الشخص، ثم نفّذ السحب الشامل لمشاريعه.',
+  },
+  {
+    label: 'كل بيانات مشروع',
+    icon: '⛁',
+    hint: 'صورة كاملة: مهام، رسائل، بطاقات، أعضاء',
+    prompt:
+      'أريد سحب كل بيانات مشروع (الأعضاء، كل المهام المفتوحة والمكتملة، الرسائل، البطاقات). اعرض مشاريعي أولاً لأختار المشروع، ثم نفّذ السحب الكامل.',
+  },
+];
+
 const RISK_LABEL: Record<ToolEvent['risk'], string> = {
   readonly: 'قراءة',
   write: 'تعديل',
@@ -688,6 +727,28 @@ export function ChatWorkspace({
       </div>
 
       <aside className="space-y-6">
+        <Panel title="سحب شامل · بيانات كاملة">
+          <p className="mb-3 text-xs leading-relaxed text-[var(--fg-subtle)]">
+            سحب مؤكَّد عبر كل الصفحات — لا يكتفي بأول صفحة. يبلّغك إن كانت النتيجة ناقصة.
+          </p>
+          <div className="grid gap-2">
+            {QUICK_PULLS.map((q) => (
+              <button
+                key={q.label}
+                onClick={() => send(q.prompt)}
+                disabled={pending}
+                title={q.hint}
+                className="flex items-center gap-2 rounded-lg border border-[var(--accent)]/30 bg-[var(--accent)]/5 px-3 py-2 text-right text-sm text-[var(--fg-muted)] transition hover:border-[var(--accent)] hover:text-[var(--fg)] disabled:opacity-50"
+              >
+                <span aria-hidden className="text-[var(--accent)]">
+                  {q.icon}
+                </span>
+                <span className="flex-1">{q.label}</span>
+              </button>
+            ))}
+          </div>
+        </Panel>
+
         <Panel title="اقتراحات">
           <ul className="space-y-2 text-sm">
             {suggestions.map((s) => (

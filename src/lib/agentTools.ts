@@ -1408,6 +1408,178 @@ const SPECS: ToolSpec[] = [
         since: i.since_days ? new Date(Date.now() - i.since_days * DAY_MS) : undefined,
       }),
   },
+
+  // ───────── Deterministic bulk pulls ("اسحب كل شيء") ─────────
+  //
+  // These are single-call, deterministic snapshots. The server walks EVERY page
+  // and fans out across sub-resources, so the model never has to loop-and-quit.
+  // Output is summary-first (count/incomplete/errors before the items) so the
+  // decision-critical signal survives the route's output-truncation cap even on
+  // very large accounts. `incomplete: true` means a page cap or sub-resource
+  // error left the result partial — the agent must say so, never claim "all".
+  {
+    name: 'pull_all_projects',
+    risk: 'readonly',
+    description:
+      'اسحب كل مشاريع الحساب بشكل شامل ومؤكَّد — يتنقّل عبر جميع الصفحات حتى النهاية ولا يكتفي بأوّل صفحة. يمكن تضمين المؤرشفة/المحذوفة. يعيد count و incomplete وقائمة المشاريع.',
+    effect: (i) =>
+      `سأسحب كل المشاريع (${((i?.statuses as string[]) ?? ['active']).join('، ')}) بالكامل.`,
+    schema: {
+      type: 'object',
+      properties: {
+        statuses: {
+          type: 'array',
+          items: { type: 'string', enum: ['active', 'archived', 'trashed'] },
+          description: 'الحالات المطلوبة. الافتراضي: active فقط.',
+        },
+      },
+    },
+    validator: z.object({
+      statuses: z.array(z.enum(['active', 'archived', 'trashed'])).min(1).max(3).optional(),
+    }),
+    run: async (i, c) => {
+      const r = await c.pullAllProjects(i.statuses ?? ['active']);
+      return {
+        count: r.projects.length,
+        incomplete: r.incomplete,
+        errors: r.errors,
+        projects: r.projects.map((p: any) => ({
+          id: p.id,
+          name: p.name,
+          status: p.status ?? 'active',
+        })),
+      };
+    },
+  },
+  {
+    name: 'pull_all_people',
+    risk: 'readonly',
+    description:
+      'اسحب كل الأشخاص على الحساب بشكل شامل عبر كل الصفحات. يعيد count و incomplete وقائمة مختصرة (المعرّف، الاسم، البريد، المسمّى).',
+    effect: () => 'سأسحب كل الأشخاص في الحساب بالكامل.',
+    schema: { type: 'object', properties: {} },
+    validator: z.object({}).passthrough(),
+    run: async (_i, c) => {
+      const people = await c.listPeopleInAccount();
+      return {
+        count: people.length,
+        people: people.map((p: any) => ({
+          id: p.id,
+          name: p.name,
+          email: p.email_address,
+          title: p.title,
+        })),
+      };
+    },
+  },
+  {
+    name: 'pull_all_cards',
+    risk: 'readonly',
+    description:
+      'اسحب كل بطاقات لوحة كانبان لمشروع بالكامل — عبر جميع الأعمدة وكل الصفحات. مرّر project_id؛ وإن لم تمرّر card_table_id فسأستخرجه تلقائياً من لوحة أدوات المشروع. يعيد إجمالي البطاقات وتوزيعها على الأعمدة و incomplete.',
+    effect: (i) => `سأسحب كل بطاقات المشروع رقم ${i.project_id} عبر جميع الأعمدة.`,
+    schema: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'integer' },
+        card_table_id: { type: 'integer' },
+      },
+      required: ['project_id'],
+    },
+    validator: z.object({ project_id: idSchema, card_table_id: idSchema.optional() }),
+    run: async (i, c) => {
+      let tableId: number | undefined = i.card_table_id;
+      if (!tableId) {
+        const project = await c.getProject(i.project_id);
+        const dock: any[] = Array.isArray(project?.dock) ? project.dock : [];
+        const kb = dock.find((d) => d?.name === 'kanban_board' && d?.enabled !== false);
+        if (!kb?.id) {
+          return {
+            error:
+              'لا توجد لوحة كانبان مفعّلة في هذا المشروع. مرّر card_table_id صراحةً إن كنت تعرفه.',
+          };
+        }
+        tableId = kb.id as number;
+      }
+      const r = await c.pullAllCardsInTable(i.project_id, tableId);
+      return {
+        card_table_id: r.cardTableId,
+        total_cards: r.totalCards,
+        incomplete: r.incomplete,
+        errors: r.errors,
+        columns: r.columns.map((col) => ({ id: col.id, title: col.title, count: col.cardsCount })),
+        cards: r.cards.map((card: any) => ({
+          id: card.id,
+          title: card.title,
+          column: card.parent?.title ?? card.column?.title,
+          assignees: Array.isArray(card.assignees)
+            ? card.assignees.map((a: any) => a?.name).filter(Boolean)
+            : [],
+          due_on: card.due_on ?? null,
+          completed: card.completed ?? false,
+        })),
+      };
+    },
+  },
+  {
+    name: 'pull_person_projects',
+    risk: 'readonly',
+    description:
+      'اسحب كل المشاريع التي يشارك فيها شخص معيّن بشكل شامل ومؤكَّد (يفحص عضوية كل مشروع على الحساب). مرّر person_id. يمكن تضمين المؤرشفة. يعيد قائمة المشاريع و scanned و incomplete.',
+    effect: (i) =>
+      `سأفحص كل مشاريع الحساب لأحدّد ما يشارك فيه الشخص رقم ${i.person_id}.`,
+    schema: {
+      type: 'object',
+      properties: {
+        person_id: { type: 'integer' },
+        include_archived: { type: 'boolean' },
+      },
+      required: ['person_id'],
+    },
+    validator: z.object({ person_id: idSchema, include_archived: z.boolean().optional() }),
+    run: (i, c) =>
+      c.pullProjectsForPerson(i.person_id, { includeArchived: i.include_archived ?? false }),
+  },
+  {
+    name: 'pull_project_everything',
+    risk: 'readonly',
+    description:
+      'اسحب صورة كاملة لمشروع واحد: الأعضاء، وكل قوائم المهام بكل مهامها (المفتوحة والمكتملة)، وكل الرسائل، وكل بطاقات كانبان. كل قسم يُجلب باستقلال فإن فشل قسم تُكمل البقية وتُسجّل في errors. مرّر project_id.',
+    effect: (i) => `سأسحب كل بيانات المشروع رقم ${i.project_id} (مهام، رسائل، بطاقات، أعضاء).`,
+    schema: {
+      type: 'object',
+      properties: { project_id: { type: 'integer' } },
+      required: ['project_id'],
+    },
+    validator: z.object({ project_id: idSchema }),
+    run: async (i, c) => {
+      const d = await c.pullProjectEverything(i.project_id);
+      // Summary-first + titles-only projection to stay within model context.
+      return {
+        project: d.project,
+        counts: d.counts,
+        incomplete: d.incomplete,
+        errors: d.errors,
+        people: d.people.map((p: any) => ({ id: p.id, name: p.name })),
+        todo_lists: d.todoLists.map((l) => ({
+          id: l.id,
+          name: l.name,
+          active: l.active.map((t: any) => t.content ?? t.title),
+          completed_count: l.completed.length,
+        })),
+        messages: d.messages.map((m: any) => ({
+          id: m.id,
+          subject: m.subject ?? m.title,
+        })),
+        cards: d.cards
+          ? {
+              total: d.cards.totalCards,
+              columns: d.cards.columns.map((col) => ({ title: col.title, count: col.cardsCount })),
+            }
+          : null,
+      };
+    },
+  },
 ];
 
 function withConfirmed(schema: Record<string, any>, risk: Risk): Record<string, any> {

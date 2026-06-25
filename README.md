@@ -393,6 +393,16 @@ update a visible execution checklist while it works any multi-step or batch requ
 plan is rendered in the chat as a live "خطة التنفيذ" card, and the agent updates each step's
 status (`pending` → `in_progress` → `done`/`failed`) and gives a final verification summary.
 
+**Deterministic bulk pulls** (`pull_all_projects`, `pull_all_people`, `pull_all_cards`,
+`pull_person_projects`, `pull_project_everything`) — single-call, exhaustive snapshots. Each one
+walks **every page** of Link-header pagination (no early stop) and fans out across sub-resources
+with bounded concurrency, isolating per-item failures instead of aborting. Every result is
+summary-first and carries an `incomplete` flag plus an `errors` list, so partial data is never
+mistaken for complete. These are surfaced in the UI as one-click **«سحب شامل»** buttons that map
+directly to a single tool — the agent gets the full dataset in one efficient call rather than
+looping and quitting after a few pages. (All the underlying `list_*` methods were also upgraded
+from single-page to fully paginated, fixing silent truncation at ~15 rows.)
+
 `list_projects`, `get_project`, `create_project`, `trash_project`, `list_people_in_account`,
 `list_people_in_project`, `grant_people_to_project`, `revoke_people_from_project`,
 `list_todo_lists`, `create_todo_list`, `list_todos`, `get_todo`, `create_todo`,
@@ -401,6 +411,31 @@ status (`pending` → `in_progress` → `done`/`failed`) and gives a final verif
 `my_assignments`, `my_overdue`.
 
 See `src/lib/agentTools.ts` for the full schema, risk levels, and Arabic effect strings.
+
+---
+
+## Tests
+
+```
+npm test          # run once (vitest run)
+npm run test:watch
+```
+
+`src/lib/basecamp.test.ts` covers the pagination + bulk-pull layer with a mocked `fetch`:
+
+- **`parseNextLink`** — RFC-5988 edge cases (quoted/unquoted `rel`, commas inside the URL,
+  prev/last-only, malformed entries).
+- **Exhaustive pagination** — follows `rel="next"` across many pages, stops on an empty page,
+  and breaks a self-referential `next` loop instead of spinning to the page cap.
+- **Retries** — retries 5xx then succeeds; does *not* retry a 404 and surfaces a typed
+  `not_found` error.
+- **Deterministic pulls** — `pullProjectsForPerson` (membership filtering + per-project read
+  failures → `incomplete`), `pullAllCardsInTable` (cross-column aggregation, isolating a failing
+  column, multi-page cards), `pullAllProjects` (cross-status de-dup), and `pullProjectEverything`
+  (dock-driven assembly with a missing tool and a failing section).
+
+Vitest aliases `server-only` to a no-op (`test/empty-module.ts`) and injects boot env vars via
+`vitest.config.ts`.
 
 ---
 
